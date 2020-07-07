@@ -8,18 +8,18 @@ import torch
 torch.set_num_threads(1)
 """
 
-def single_tensor(k):
-    a = torch.zeros(k, 3, 112, 112)
-
 def for_loop_nostack(k):
     test = []
     for i in range(k):
-        test.append(torch.zeros(3, 112, 112))
+        test.append(torch.empty((3, 112, 112)))
+
+def single_tensor(k):
+    a = torch.empty((k, 3, 112, 112))
 
 def for_loop_stack(k):
     test = []
     for i in range(k):
-        test.append(torch.zeros(3, 112, 112))
+        test.append(torch.empty((3, 112, 112)))
     a = torch.stack(test)
 
 methods, ks, times = [], [], []
@@ -31,4 +31,4 @@ for method in ["single_tensor", "for_loop_nostack", "for_loop_stack"]:
         ks.append(k)
 
 df = pd.DataFrame({"method": methods, "k": ks, "time":times})
-df.to_csv("torch_zeros_speed.csv")
+df.to_csv("torch_empty_speed.csv")
