@@ -26,13 +26,11 @@ def get_pyav(path):
 setup_cv2 = """\
 import torch
 import cv2
-cv2.setNumThreads(1)
 import numpy as np
 """
 
 def get_cv2(path):
     images_cv2 = []
-    cv2.setNumThreads(1)
     cap = cv2.VideoCapture(path)
     while(cap.isOpened()):
         ret, frame = cap.read()
@@ -65,27 +63,30 @@ def get_tvvr(path):
 loaders = []
 times = []
 video = []
-for file in os.listdir("./videos"):
-    if file in ["README", ".ipynb_checkpoints"]:
-        print("Skipping README")
-        continue
-    path = os.path.join("./videos/", file)
 
-    times.append( timeit.timeit(f"get_cv2(\"{path}\")", setup=setup_cv2, globals=globals(), number=NUBMER_TRIALS)/NUBMER_TRIALS)
-    video.append(file)
-    loaders.append("CV2")
+for i in range(10):
+    for file in os.listdir("./videos"):
+        if file in ["README", ".ipynb_checkpoints"]:
+            print("Skipping README")
+            continue
+        
+        path = os.path.join("./videos/", file)
 
-    times.append( timeit.timeit(f"get_pyav(\"{path}\")", setup=setup_pyav, globals=globals(), number=NUBMER_TRIALS)/NUBMER_TRIALS)
-    video.append(file)
-    loaders.append("pyav")
+        times.append(timeit.timeit(f"get_cv2(\"{path}\")", setup=setup_cv2, globals=globals(), number=NUBMER_TRIALS)/NUBMER_TRIALS)
+        video.append(file)
+        loaders.append("CV2")
 
-    times.append( timeit.timeit(f"get_tv(\"{path}\")", setup=setup_tv, globals=globals(), number=NUBMER_TRIALS)/NUBMER_TRIALS)
-    video.append(file)
-    loaders.append("tv_pyav")
+        times.append( timeit.timeit(f"get_pyav(\"{path}\")", setup=setup_pyav, globals=globals(), number=NUBMER_TRIALS)/NUBMER_TRIALS)
+        video.append(file)
+        loaders.append("pyav")
 
-    times.append( timeit.timeit(f"get_tvvr(\"{path}\")", setup=setup_tvvr, globals=globals(), number=NUBMER_TRIALS)/NUBMER_TRIALS)
-    video.append(file)
-    loaders.append("tv_vr")
+        times.append( timeit.timeit(f"get_tv(\"{path}\")", setup=setup_tv, globals=globals(), number=NUBMER_TRIALS)/NUBMER_TRIALS)
+        video.append(file)
+        loaders.append("tv_pyav")
+
+        times.append( timeit.timeit(f"get_tvvr(\"{path}\")", setup=setup_tvvr, globals=globals(), number=NUBMER_TRIALS)/NUBMER_TRIALS)
+        video.append(file)
+        loaders.append("tv_vr")
 
 df = pd.DataFrame({"loader": loaders, "video": video, "time":times})
 df.to_csv("pyav_basic_speeds.csv")
