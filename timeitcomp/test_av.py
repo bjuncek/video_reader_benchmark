@@ -9,7 +9,7 @@ import torchvision
 from decord import VideoReader
 from decord import cpu, gpu
 
-NUBMER_TRIALS=2
+NUBMER_TRIALS=10
 
 setup_pyav = """\
 import torch
@@ -81,7 +81,7 @@ times = []
 video = []
 
 for i in range(10):
-    for file in os.listdir("./videos"):
+    for file in os.listdir("../videos"):
         if file in ["README", ".ipynb_checkpoints"]:
             print("Skipping README")
             continue
@@ -110,4 +110,4 @@ for i in range(10):
         loaders.append("decord")
 
 df = pd.DataFrame({"loader": loaders, "video": video, "time":times})
-df.to_csv("pyav_basic_speeds.csv")
+df.to_csv("basic_reading_speeds.csv")

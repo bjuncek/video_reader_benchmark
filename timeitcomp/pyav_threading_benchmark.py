@@ -26,7 +26,7 @@ def get_pyav(path, ttype):
         images_av.append(frame.to_rgb().to_ndarray())
 
 
-videos = [os.path.join("./videos/", x) for x in os.listdir("./videos") if x not in ["README", ".ipynb_checkpoints"]]
+videos = [os.path.join("../videos/", x) for x in os.listdir("./videos") if x not in ["README", ".ipynb_checkpoints"]]
 
 thread_type = []
 times = []
