@@ -94,7 +94,7 @@ video = []
 num_frames = []
 tv_version = []
 
-for i in range(100):
+for i in range(10):
     for file in os.listdir("../videos"):
         if file in ["README", ".ipynb_checkpoints"]:
             print("Skipping README")
@@ -105,7 +105,7 @@ for i in range(100):
         print(path)
         vframes, _, _ = torchvision.io.read_video(path)
         nframes = len(vframes)
-        tv_version.append(torchvision.__version__)
+        # tv_version.append(torchvision.__version__)
 
 
         times.append(timeit.timeit(f"get_cv2(\"{path}\")", setup=setup_cv2, globals=globals(), number=NUBMER_TRIALS)/NUBMER_TRIALS)
@@ -144,5 +144,5 @@ for i in range(100):
         num_frames.append(nframes)
         tv_version.append(torchvision.__version__)
 
-df = pd.DataFrame({"loader": loaders, "video": video, "time":times})
+df = pd.DataFrame({"loader": loaders, "video": video, "time":times, "num_frames":num_frames, "tv": tv_version})
 df.to_csv("basic_reading_speeds.csv")
