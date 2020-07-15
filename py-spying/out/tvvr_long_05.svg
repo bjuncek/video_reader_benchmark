@@ -1,0 +1,419 @@
+<?xml version="1.0" standalone="no"?><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"><svg version="1.1" width="1200" height="934" onload="init(evt)" viewBox="0 0 1200 934" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><!--Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples.--><!--NOTES: --><defs><linearGradient id="background" y1="0" y2="1" x1="0" x2="0"><stop stop-color="#eeeeee" offset="5%"/><stop stop-color="#eeeeb0" offset="95%"/></linearGradient></defs><style type="text/css">
+text { font-family:"Verdana"; font-size:12px; fill:rgb(0,0,0); }
+#title { text-anchor:middle; font-size:17px; }
+#search { opacity:0.1; cursor:pointer; }
+#search:hover, #search.show { opacity:1; }
+#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+#unzoom { cursor:pointer; }
+#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+.hide { display:none; }
+.parent { opacity:0.5; }
+</style><script type="text/ecmascript"><![CDATA[var nametype = 'Function:';
+var fontsize = 12;
+var fontwidth = 0.59;
+var xpad = 10;
+var inverted = true;
+var searchcolor = 'rgb(230,0,230)';
+var fluiddrawing = true;
+var truncate_text_right = false;]]><![CDATA["use strict";
+var details, searchbtn, unzoombtn, matchedtxt, svg, searching, frames;
+function init(evt) {
+    details = document.getElementById("details").firstChild;
+    searchbtn = document.getElementById("search");
+    unzoombtn = document.getElementById("unzoom");
+    matchedtxt = document.getElementById("matched");
+    svg = document.getElementsByTagName("svg")[0];
+    frames = document.getElementById("frames");
+    searching = 0;
+
+    // Use GET parameters to restore a flamegraph's state.
+    var restore_state = function() {
+        var params = get_params();
+        if (params.x && params.y)
+            zoom(find_group(document.querySelector('[x="' + params.x + '"][y="' + params.y + '"]')));
+        if (params.s)
+            search(params.s);
+    };
+
+    if (fluiddrawing) {
+        // Make width dynamic so the SVG fits its parent's width.
+        svg.removeAttribute("width");
+        // Edge requires us to have a viewBox that gets updated with size changes.
+        var isEdge = /Edge\/\d./i.test(navigator.userAgent);
+        if (!isEdge) {
+          svg.removeAttribute("viewBox");
+        }
+        var update_for_width_change = function() {
+            if (isEdge) {
+                svg.attributes.viewBox.value = "0 0 " + svg.width.baseVal.value + " " + svg.height.baseVal.value;
+            }
+
+            // Keep consistent padding on left and right of frames container.
+            frames.attributes.width.value = svg.width.baseVal.value - xpad * 2;
+
+            // Text truncation needs to be adjusted for the current width.
+            var el = frames.children;
+            for(var i = 0; i < el.length; i++) {
+                update_text(el[i]);
+            }
+
+            // Keep search elements at a fixed distance from right edge.
+            var svgWidth = svg.width.baseVal.value;
+            searchbtn.attributes.x.value = svgWidth - xpad - 100;
+            matchedtxt.attributes.x.value = svgWidth - xpad - 100;
+        };
+        window.addEventListener('resize', function() {
+            update_for_width_change();
+        });
+        // This needs to be done asynchronously for Safari to work.
+        setTimeout(function() {
+            unzoom();
+            update_for_width_change();
+            restore_state();
+        }, 0);
+    } else {
+        restore_state();
+    }
+}
+// event listeners
+window.addEventListener("click", function(e) {
+    var target = find_group(e.target);
+    if (target) {
+        if (target.nodeName == "a") {
+            if (e.ctrlKey === false) return;
+            e.preventDefault();
+        }
+        if (target.classList.contains("parent")) unzoom();
+        zoom(target);
+
+        // set parameters for zoom state
+        var el = target.querySelector("rect");
+        if (el && el.attributes && el.attributes.y && el.attributes._orig_x) {
+            var params = get_params()
+            params.x = el.attributes._orig_x.value;
+            params.y = el.attributes.y.value;
+            history.replaceState(null, null, parse_params(params));
+        }
+    }
+    else if (e.target.id == "unzoom") {
+        unzoom();
+
+        // remove zoom state
+        var params = get_params();
+        if (params.x) delete params.x;
+        if (params.y) delete params.y;
+        history.replaceState(null, null, parse_params(params));
+    }
+    else if (e.target.id == "search") search_prompt();
+}, false)
+// mouse-over for info
+// show
+window.addEventListener("mouseover", function(e) {
+    var target = find_group(e.target);
+    if (target) details.nodeValue = nametype + " " + g_to_text(target);
+}, false)
+// clear
+window.addEventListener("mouseout", function(e) {
+    var target = find_group(e.target);
+    if (target) details.nodeValue = ' ';
+}, false)
+// ctrl-F for search
+window.addEventListener("keydown",function (e) {
+    if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+        e.preventDefault();
+        search_prompt();
+    }
+}, false)
+// functions
+function get_params() {
+    var params = {};
+    var paramsarr = window.location.search.substr(1).split('&');
+    for (var i = 0; i < paramsarr.length; ++i) {
+        var tmp = paramsarr[i].split("=");
+        if (!tmp[0] || !tmp[1]) continue;
+        params[tmp[0]]  = decodeURIComponent(tmp[1]);
+    }
+    return params;
+}
+function parse_params(params) {
+    var uri = "?";
+    for (var key in params) {
+        uri += key + '=' + encodeURIComponent(params[key]) + '&';
+    }
+    if (uri.slice(-1) == "&")
+        uri = uri.substring(0, uri.length - 1);
+    if (uri == '?')
+        uri = window.location.href.split('?')[0];
+    return uri;
+}
+function find_child(node, selector) {
+    var children = node.querySelectorAll(selector);
+    if (children.length) return children[0];
+    return;
+}
+function find_group(node) {
+    var parent = node.parentElement;
+    if (!parent) return;
+    if (parent.id == "frames") return node;
+    return find_group(parent);
+}
+function orig_save(e, attr, val) {
+    if (e.attributes["_orig_" + attr] != undefined) return;
+    if (e.attributes[attr] == undefined) return;
+    if (val == undefined) val = e.attributes[attr].value;
+    e.setAttribute("_orig_" + attr, val);
+}
+function orig_load(e, attr) {
+    if (e.attributes["_orig_"+attr] == undefined) return;
+    e.attributes[attr].value = e.attributes["_orig_" + attr].value;
+    e.removeAttribute("_orig_" + attr);
+}
+function g_to_text(e) {
+    var text = find_child(e, "title").firstChild.nodeValue;
+    return (text)
+}
+function g_to_func(e) {
+    var func = g_to_text(e);
+    // if there's any manipulation we want to do to the function
+    // name before it's searched, do it here before returning.
+    return (func);
+}
+function update_text(e) {
+    var r = find_child(e, "rect");
+    var t = find_child(e, "text");
+    var w = parseFloat(r.attributes.width.value) * frames.attributes.width.value / 100 - 3;
+    var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+    t.attributes.x.value = format_percent((parseFloat(r.attributes.x.value) + (100 * 3 / frames.attributes.width.value)));
+    // Smaller than this size won't fit anything
+    if (w < 2 * fontsize * fontwidth) {
+        t.textContent = "";
+        return;
+    }
+    t.textContent = txt;
+    // Fit in full text width
+    if (/^ *\$/.test(txt) || t.getComputedTextLength() < w)
+        return;
+    if (truncate_text_right) {
+        // Truncate the right side of the text.
+        for (var x = txt.length - 2; x > 0; x--) {
+            if (t.getSubStringLength(0, x + 2) <= w) {
+                t.textContent = txt.substring(0, x) + "..";
+                return;
+            }
+        }
+    } else {
+        // Truncate the left side of the text.
+        for (var x = 2; x < txt.length; x++) {
+            if (t.getSubStringLength(x - 2, txt.length) <= w) {
+                t.textContent = ".." + txt.substring(x, txt.length);
+                return;
+            }
+        }
+    }
+    t.textContent = "";
+}
+// zoom
+function zoom_reset(e) {
+    if (e.attributes != undefined) {
+        orig_load(e, "x");
+        orig_load(e, "width");
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_reset(c[i]);
+    }
+}
+function zoom_child(e, x, ratio) {
+    if (e.attributes != undefined) {
+        if (e.attributes.x != undefined) {
+            orig_save(e, "x");
+            e.attributes.x.value = format_percent((parseFloat(e.attributes.x.value) - x) * ratio);
+            if (e.tagName == "text") {
+                e.attributes.x.value = format_percent(parseFloat(find_child(e.parentNode, "rect[x]").attributes.x.value) + (100 * 3 / frames.attributes.width.value));
+            }
+        }
+        if (e.attributes.width != undefined) {
+            orig_save(e, "width");
+            e.attributes.width.value = format_percent(parseFloat(e.attributes.width.value) * ratio);
+        }
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_child(c[i], x, ratio);
+    }
+}
+function zoom_parent(e) {
+    if (e.attributes) {
+        if (e.attributes.x != undefined) {
+            orig_save(e, "x");
+            e.attributes.x.value = "0.0%";
+        }
+        if (e.attributes.width != undefined) {
+            orig_save(e, "width");
+            e.attributes.width.value = "100.0%";
+        }
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_parent(c[i]);
+    }
+}
+function zoom(node) {
+    var attr = find_child(node, "rect").attributes;
+    var width = parseFloat(attr.width.value);
+    var xmin = parseFloat(attr.x.value);
+    var xmax = xmin + width;
+    var ymin = parseFloat(attr.y.value);
+    var ratio = 100 / width;
+    // XXX: Workaround for JavaScript float issues (fix me)
+    var fudge = 0.001;
+    unzoombtn.classList.remove("hide");
+    var el = frames.children;
+    for (var i = 0; i < el.length; i++) {
+        var e = el[i];
+        var a = find_child(e, "rect").attributes;
+        var ex = parseFloat(a.x.value);
+        var ew = parseFloat(a.width.value);
+        // Is it an ancestor
+        if (!inverted) {
+            var upstack = parseFloat(a.y.value) > ymin;
+        } else {
+            var upstack = parseFloat(a.y.value) < ymin;
+        }
+        if (upstack) {
+            // Direct ancestor
+            if (ex <= xmin && (ex+ew+fudge) >= xmax) {
+                e.classList.add("parent");
+                zoom_parent(e);
+                update_text(e);
+            }
+            // not in current path
+            else
+                e.classList.add("hide");
+        }
+        // Children maybe
+        else {
+            // no common path
+            if (ex < xmin || ex + fudge >= xmax) {
+                e.classList.add("hide");
+            }
+            else {
+                zoom_child(e, xmin, ratio);
+                update_text(e);
+            }
+        }
+    }
+}
+function unzoom() {
+    unzoombtn.classList.add("hide");
+    var el = frames.children;
+    for(var i = 0; i < el.length; i++) {
+        el[i].classList.remove("parent");
+        el[i].classList.remove("hide");
+        zoom_reset(el[i]);
+        update_text(el[i]);
+    }
+}
+// search
+function reset_search() {
+    var el = document.querySelectorAll("#frames rect");
+    for (var i = 0; i < el.length; i++) {
+        orig_load(el[i], "fill")
+    }
+    var params = get_params();
+    delete params.s;
+    history.replaceState(null, null, parse_params(params));
+}
+function search_prompt() {
+    if (!searching) {
+        var term = prompt("Enter a search term (regexp " +
+            "allowed, eg: ^ext4_)", "");
+        if (term != null) {
+            search(term)
+        }
+    } else {
+        reset_search();
+        searching = 0;
+        searchbtn.classList.remove("show");
+        searchbtn.firstChild.nodeValue = "Search"
+        matchedtxt.classList.add("hide");
+        matchedtxt.firstChild.nodeValue = ""
+    }
+}
+function search(term) {
+    var re = new RegExp(term);
+    var el = frames.children;
+    var matches = new Object();
+    var maxwidth = 0;
+    for (var i = 0; i < el.length; i++) {
+        var e = el[i];
+        var func = g_to_func(e);
+        var rect = find_child(e, "rect");
+        if (func == null || rect == null)
+            continue;
+        // Save max width. Only works as we have a root frame
+        var w = parseFloat(rect.attributes.width.value);
+        if (w > maxwidth)
+            maxwidth = w;
+        if (func.match(re)) {
+            // highlight
+            var x = parseFloat(rect.attributes.x.value);
+            orig_save(rect, "fill");
+            rect.attributes.fill.value = searchcolor;
+            // remember matches
+            if (matches[x] == undefined) {
+                matches[x] = w;
+            } else {
+                if (w > matches[x]) {
+                    // overwrite with parent
+                    matches[x] = w;
+                }
+            }
+            searching = 1;
+        }
+    }
+    if (!searching)
+        return;
+    var params = get_params();
+    params.s = term;
+    history.replaceState(null, null, parse_params(params));
+
+    searchbtn.classList.add("show");
+    searchbtn.firstChild.nodeValue = "Reset Search";
+    // calculate percent matched, excluding vertical overlap
+    var count = 0;
+    var lastx = -1;
+    var lastw = 0;
+    var keys = Array();
+    for (k in matches) {
+        if (matches.hasOwnProperty(k))
+            keys.push(k);
+    }
+    // sort the matched frames by their x location
+    // ascending, then width descending
+    keys.sort(function(a, b){
+        return a - b;
+    });
+    // Step through frames saving only the biggest bottom-up frames
+    // thanks to the sort order. This relies on the tree property
+    // where children are always smaller than their parents.
+    var fudge = 0.0001;    // JavaScript floating point
+    for (var k in keys) {
+        var x = parseFloat(keys[k]);
+        var w = matches[keys[k]];
+        if (x >= lastx + lastw - fudge) {
+            count += w;
+            lastx = x;
+            lastw = w;
+        }
+    }
+    // display matched percent
+    matchedtxt.classList.remove("hide");
+    var pct = 100 * count / maxwidth;
+    if (pct != 100) pct = pct.toFixed(1);
+    matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+}
+function format_percent(n) {
+    return n.toFixed(4) + "%";
+}
+]]></script><rect x="0" y="0" width="100%" height="934" fill="url(#background)"/><text id="title" x="50.0000%" y="24.00">py-spy</text><text id="details" x="10" y="917.00"> </text><text id="unzoom" class="hide" x="10" y="24.00">Reset Zoom</text><text id="search" x="1090" y="24.00">Search</text><text id="matched" x="1090" y="917.00"> </text><svg id="frames" x="10" width="1180"><g><title>0x7f1e7e8a26fa (libavformat.so.58.29.100) (241 samples, 1.48%)</title><rect x="1.9205%" y="468" width="1.4787%" height="15" fill="rgb(227,0,7)"/><text x="2.1705%" y="478.50"></text></g><g><title>0x7f1e7e8a21bc (libavformat.so.58.29.100) (238 samples, 1.46%)</title><rect x="1.9389%" y="484" width="1.4603%" height="15" fill="rgb(217,0,24)"/><text x="2.1889%" y="494.50"></text></g><g><title>0x7f1e7e8a21bc (libavformat.so.58.29.100) (243 samples, 1.49%)</title><rect x="1.9205%" y="452" width="1.4910%" height="15" fill="rgb(221,193,54)"/><text x="2.1705%" y="462.50"></text></g><g><title>0x7f1e7e8aae06 (libavformat.so.58.29.100) (247 samples, 1.52%)</title><rect x="1.9021%" y="436" width="1.5155%" height="15" fill="rgb(248,212,6)"/><text x="2.1521%" y="446.50"></text></g><g><title>FfmpegDecoder::init (FfmpegDecoder.cpp:168) (402 samples, 2.47%)</title><rect x="1.4664%" y="404" width="2.4666%" height="15" fill="rgb(208,68,35)"/><text x="1.7164%" y="414.50">Ff..</text></g><g><title>avformat_open_input (libavformat.so.58.29.100) (402 samples, 2.47%)</title><rect x="1.4664%" y="420" width="2.4666%" height="15" fill="rgb(232,128,0)"/><text x="1.7164%" y="430.50">av..</text></g><g><title>FfmpegDecoder::init (FfmpegDecoder.cpp:178) (173 samples, 1.06%)</title><rect x="3.9330%" y="404" width="1.0615%" height="15" fill="rgb(207,160,47)"/><text x="4.1830%" y="414.50"></text></g><g><title>avformat_find_stream_info (libavformat.so.58.29.100) (173 samples, 1.06%)</title><rect x="3.9330%" y="420" width="1.0615%" height="15" fill="rgb(228,23,34)"/><text x="4.1830%" y="430.50"></text></g><g><title>video_reader::probeVideo (VideoReader.cpp:416) (605 samples, 3.71%)</title><rect x="1.4603%" y="340" width="3.7121%" height="15" fill="rgb(218,30,26)"/><text x="1.7103%" y="350.50">vide..</text></g><g><title>std::unique_ptr&lt;DecoderParameters, std::default_delete&lt;DecoderParameters&gt; &gt;::~unique_ptr (unique_ptr.h:262) (605 samples, 3.71%)</title><rect x="1.4603%" y="356" width="3.7121%" height="15" fill="rgb(220,122,19)"/><text x="1.7103%" y="366.50">std:..</text></g><g><title>FfmpegDecoder::probeFile (FfmpegDecoder.cpp:229) (604 samples, 3.71%)</title><rect x="1.4664%" y="372" width="3.7060%" height="15" fill="rgb(250,228,42)"/><text x="1.7164%" y="382.50">Ffmp..</text></g><g><title>std::unique_ptr&lt;DecoderParameters, std::default_delete&lt;DecoderParameters&gt; &gt;::~unique_ptr (unique_ptr.h:262) (604 samples, 3.71%)</title><rect x="1.4664%" y="388" width="3.7060%" height="15" fill="rgb(240,193,28)"/><text x="1.7164%" y="398.50">std:..</text></g><g><title>std::string::~string (basic_string.h:3630) (624 samples, 3.83%)</title><rect x="1.3867%" y="308" width="3.8287%" height="15" fill="rgb(216,20,37)"/><text x="1.6367%" y="318.50">std:..</text></g><g><title>std::string::_M_rep (basic_string.h:3312) (624 samples, 3.83%)</title><rect x="1.3867%" y="324" width="3.8287%" height="15" fill="rgb(206,188,39)"/><text x="1.6367%" y="334.50">std:..</text></g><g><title>c10::KernelFunction::callBoxed (libtorch.so) (625 samples, 3.83%)</title><rect x="1.3867%" y="180" width="3.8348%" height="15" fill="rgb(217,207,13)"/><text x="1.6367%" y="190.50">c10:..</text></g><g><title>c10::detail::wrap_kernel_functor_boxed&lt;c10::detail::WrapRuntimeKernelFunctor_&lt;c10::List&lt;at::Tensor&gt; (*)(std::string), c10::List&lt;at::Tensor&gt;, c10::guts::typelist::typelist&lt;std::string&gt; &gt;, true, void&gt;::call (kernel_functor.h:234) (625 samples, 3.83%)</title><rect x="1.3867%" y="196" width="3.8348%" height="15" fill="rgb(231,73,38)"/><text x="1.6367%" y="206.50">c10:..</text></g><g><title>c10::detail::call_functor_with_args_from_stack&lt;c10::detail::WrapRuntimeKernelFunctor_&lt;c10::List&lt;at::Tensor&gt; (*)(std::string), c10::List&lt;at::Tensor&gt;, c10::guts::typelist::typelist&lt;std::string&gt; &gt;, true&gt; (kernel_functor.h:202) (625 samples, 3.83%)</title><rect x="1.3867%" y="212" width="3.8348%" height="15" fill="rgb(225,20,46)"/><text x="1.6367%" y="222.50">c10:..</text></g><g><title>c10::detail::call_functor_with_args_from_stack_&lt;c10::detail::WrapRuntimeKernelFunctor_&lt;c10::List&lt;at::Tensor&gt; (*)(std::string), c10::List&lt;at::Tensor&gt;, c10::guts::typelist::typelist&lt;std::string&gt; &gt;, true, (unsigned long)0&gt; (kernel_functor.h:196) (625 samples, 3.83%)</title><rect x="1.3867%" y="228" width="3.8348%" height="15" fill="rgb(210,31,41)"/><text x="1.6367%" y="238.50">c10:..</text></g><g><title>c10::detail::WrapRuntimeKernelFunctor_&lt;c10::List&lt;at::Tensor&gt; (*)(std::string), c10::List&lt;at::Tensor&gt;, c10::guts::typelist::typelist&lt;std::string&gt; &gt;::operator() (kernel_lambda.h:23) (625 samples, 3.83%)</title><rect x="1.3867%" y="244" width="3.8348%" height="15" fill="rgb(221,200,47)"/><text x="1.6367%" y="254.50">c10:..</text></g><g><title>std::string::~string (basic_string.h:3630) (625 samples, 3.83%)</title><rect x="1.3867%" y="260" width="3.8348%" height="15" fill="rgb(226,26,5)"/><text x="1.6367%" y="270.50">std:..</text></g><g><title>std::string::_M_rep (basic_string.h:3312) (625 samples, 3.83%)</title><rect x="1.3867%" y="276" width="3.8348%" height="15" fill="rgb(249,33,26)"/><text x="1.6367%" y="286.50">std:..</text></g><g><title>video_reader::probeVideoFromFile (VideoReader.cpp:487) (625 samples, 3.83%)</title><rect x="1.3867%" y="292" width="3.8348%" height="15" fill="rgb(235,183,28)"/><text x="1.6367%" y="302.50">vide..</text></g><g><title>torch::jit::(anonymous namespace)::createOperatorFromC10(c10::OperatorHandle const&amp;)::{lambda(std::vector&lt;c10::IValue, std::allocator&lt;c10::IValue&gt; &gt;&amp;)#1}::operator() const (libtorch.so) (626 samples, 3.84%)</title><rect x="1.3867%" y="164" width="3.8410%" height="15" fill="rgb(221,5,38)"/><text x="1.6367%" y="174.50">torc..</text></g><g><title>_probe_video_from_file (torchvision/io/_video_opt.py:190) (650 samples, 3.99%)</title><rect x="1.2578%" y="100" width="3.9882%" height="15" fill="rgb(247,18,42)"/><text x="1.5078%" y="110.50">_pro..</text></g><g><title>pybind11::cpp_function::dispatcher (libtorch_python.so) (630 samples, 3.87%)</title><rect x="1.3805%" y="116" width="3.8655%" height="15" fill="rgb(241,131,45)"/><text x="1.6305%" y="126.50">pybi..</text></g><g><title>void pybind11::cpp_function::initialize&lt;torch::jit::initJITBindings(_object*)::{lambda(std::string const&amp;)#54}::operator()(std::string const&amp;) const::{lambda(pybind11::args, pybind11::kwargs)#1}, pybind11::object, pybind11::args, pybind11::kwargs, pybind11::name, pybind11::doc&gt;(torch::jit::initJITBindings(_object*)::{lambda(std::string const&amp;)#54}::operator()(std::string const&amp;) const::{lambda(pybind11::args&amp;&amp;, pybind11::kwargs)#1}, pybind11::object (*)(pybind11::args, pybind11::kwargs), pybind11::name const, pybind11::doc&amp;)::{lambda(pybind11::detail::function_call&amp;)#3}::_FUN (libtorch_python.so) (629 samples, 3.86%)</title><rect x="1.3867%" y="132" width="3.8594%" height="15" fill="rgb(249,31,29)"/><text x="1.6367%" y="142.50">void..</text></g><g><title>torch::jit::invokeOperatorFromPython (libtorch_python.so) (629 samples, 3.86%)</title><rect x="1.3867%" y="148" width="3.8594%" height="15" fill="rgb(225,111,53)"/><text x="1.6367%" y="158.50">torc..</text></g><g><title>_read_video (torchvision/io/_video_opt.py:358) (656 samples, 4.03%)</title><rect x="1.2517%" y="84" width="4.0250%" height="15" fill="rgb(238,160,17)"/><text x="1.5017%" y="94.50">_rea..</text></g><g><title>FfmpegDecoder::init (FfmpegDecoder.cpp:168) (226 samples, 1.39%)</title><rect x="22.7390%" y="452" width="1.3867%" height="15" fill="rgb(214,148,48)"/><text x="22.9890%" y="462.50"></text></g><g><title>avformat_open_input (libavformat.so.58.29.100) (226 samples, 1.39%)</title><rect x="22.7390%" y="468" width="1.3867%" height="15" fill="rgb(232,36,49)"/><text x="22.9890%" y="478.50"></text></g><g><title>FfmpegDecoder::decodeLoop (FfmpegDecoder.cpp:278) (363 samples, 2.23%)</title><rect x="22.7390%" y="436" width="2.2273%" height="15" fill="rgb(209,103,24)"/><text x="22.9890%" y="446.50">F..</text></g><g><title>0x7f1e7e96cd63 (libavformat.so.58.29.100) (194 samples, 1.19%)</title><rect x="24.9908%" y="484" width="1.1903%" height="15" fill="rgb(229,88,8)"/><text x="25.2408%" y="494.50"></text></g><g><title>0x7f1e7e96d93d (libavformat.so.58.29.100) (195 samples, 1.20%)</title><rect x="24.9908%" y="468" width="1.1965%" height="15" fill="rgb(213,181,19)"/><text x="25.2408%" y="478.50"></text></g><g><title>FfmpegDecoder::decodeLoop (FfmpegDecoder.cpp:290) (303 samples, 1.86%)</title><rect x="24.9663%" y="436" width="1.8591%" height="15" fill="rgb(254,191,54)"/><text x="25.2163%" y="446.50">F..</text></g><g><title>av_read_frame (libavformat.so.58.29.100) (303 samples, 1.86%)</title><rect x="24.9663%" y="452" width="1.8591%" height="15" fill="rgb(241,83,37)"/><text x="25.2163%" y="462.50">a..</text></g><g><title>0x7f1e7891f00a (libavcodec.so.58.54.100) (278 samples, 1.71%)</title><rect x="27.5985%" y="500" width="1.7057%" height="15" fill="rgb(233,36,39)"/><text x="27.8485%" y="510.50"></text></g><g><title>0x7f1e7891fe5a (libavcodec.so.58.54.100) (456 samples, 2.80%)</title><rect x="27.5678%" y="484" width="2.7979%" height="15" fill="rgb(226,3,54)"/><text x="27.8178%" y="494.50">0x..</text></g><g><title>0x7f1e7892791d (libavcodec.so.58.54.100) (383 samples, 2.35%)</title><rect x="35.6056%" y="532" width="2.3500%" height="15" fill="rgb(245,192,40)"/><text x="35.8556%" y="542.50">0..</text></g><g><title>0x7f1e78972490 (libavcodec.so.58.54.100) (1,964 samples, 12.05%)</title><rect x="31.3842%" y="516" width="12.0506%" height="15" fill="rgb(238,167,29)"/><text x="31.6342%" y="526.50">0x7f1e78972490 (li..</text></g><g><title>0x7f1e789727ac (libavcodec.so.58.54.100) (319 samples, 1.96%)</title><rect x="43.4777%" y="516" width="1.9573%" height="15" fill="rgb(232,182,51)"/><text x="43.7277%" y="526.50">0..</text></g><g><title>0x7f1e7897285d (libavcodec.so.58.54.100) (241 samples, 1.48%)</title><rect x="45.4841%" y="516" width="1.4787%" height="15" fill="rgb(231,60,39)"/><text x="45.7341%" y="526.50"></text></g><g><title>0x7f1e7884f6f7 (libavcodec.so.58.54.100) (3,282 samples, 20.14%)</title><rect x="26.8745%" y="468" width="20.1374%" height="15" fill="rgb(208,69,12)"/><text x="27.1245%" y="478.50">0x7f1e7884f6f7 (libavcodec.so.58..</text></g><g><title>0x7f1e7897a317 (libavcodec.so.58.54.100) (2,564 samples, 15.73%)</title><rect x="31.2799%" y="484" width="15.7320%" height="15" fill="rgb(235,93,37)"/><text x="31.5299%" y="494.50">0x7f1e7897a317 (libavcod..</text></g><g><title>0x7f1e789740c1 (libavcodec.so.58.54.100) (2,563 samples, 15.73%)</title><rect x="31.2860%" y="500" width="15.7259%" height="15" fill="rgb(213,116,39)"/><text x="31.5360%" y="510.50">0x7f1e789740c1 (libavcod..</text></g><g><title>FfmpegDecoder::decodeLoop (FfmpegDecoder.cpp:317) (3,315 samples, 20.34%)</title><rect x="26.8315%" y="436" width="20.3399%" height="15" fill="rgb(222,207,29)"/><text x="27.0815%" y="446.50">FfmpegDecoder::decodeLoop (Ffmpe..</text></g><g><title>avcodec_send_packet (libavcodec.so.58.54.100) (3,315 samples, 20.34%)</title><rect x="26.8315%" y="452" width="20.3399%" height="15" fill="rgb(206,96,30)"/><text x="27.0815%" y="462.50">avcodec_send_packet (libavcodec...</text></g><g><title>0x7f1e7891f00a (libavcodec.so.58.54.100) (251 samples, 1.54%)</title><rect x="48.3434%" y="532" width="1.5401%" height="15" fill="rgb(218,138,4)"/><text x="48.5934%" y="542.50"></text></g><g><title>0x7f1e7891fe5a (libavcodec.so.58.54.100) (394 samples, 2.42%)</title><rect x="48.3065%" y="516" width="2.4175%" height="15" fill="rgb(250,191,14)"/><text x="48.5565%" y="526.50">0x..</text></g><g><title>0x7f1e7892791d (libavcodec.so.58.54.100) (446 samples, 2.74%)</title><rect x="55.8535%" y="564" width="2.7365%" height="15" fill="rgb(239,60,40)"/><text x="56.1035%" y="574.50">0x..</text></g><g><title>0x7f1e78972490 (libavcodec.so.58.54.100) (2,147 samples, 13.17%)</title><rect x="51.6935%" y="548" width="13.1734%" height="15" fill="rgb(206,27,48)"/><text x="51.9435%" y="558.50">0x7f1e78972490 (liba..</text></g><g><title>0x7f1e789727ac (libavcodec.so.58.54.100) (381 samples, 2.34%)</title><rect x="64.9221%" y="548" width="2.3377%" height="15" fill="rgb(225,35,8)"/><text x="65.1721%" y="558.50">0..</text></g><g><title>0x7f1e7897285d (libavcodec.so.58.54.100) (245 samples, 1.50%)</title><rect x="67.3027%" y="548" width="1.5033%" height="15" fill="rgb(250,213,24)"/><text x="67.5527%" y="558.50"></text></g><g><title>0x7f1e789740c1 (libavcodec.so.58.54.100) (2,822 samples, 17.32%)</title><rect x="51.5462%" y="532" width="17.3150%" height="15" fill="rgb(247,123,22)"/><text x="51.7962%" y="542.50">0x7f1e789740c1 (libavcodec...</text></g><g><title>0x7f1e7884f6f7 (libavcodec.so.58.54.100) (3,465 samples, 21.26%)</title><rect x="47.6071%" y="500" width="21.2603%" height="15" fill="rgb(231,138,38)"/><text x="47.8571%" y="510.50">0x7f1e7884f6f7 (libavcodec.so.58.5..</text></g><g><title>0x7f1e7897a317 (libavcodec.so.58.54.100) (2,823 samples, 17.32%)</title><rect x="51.5462%" y="516" width="17.3211%" height="15" fill="rgb(231,145,46)"/><text x="51.7962%" y="526.50">0x7f1e7897a317 (libavcodec...</text></g><g><title>FfmpegStream::receiveFrame (FfmpegStream.cpp:151) (3,503 samples, 21.49%)</title><rect x="47.5457%" y="468" width="21.4934%" height="15" fill="rgb(251,118,11)"/><text x="47.7957%" y="478.50">FfmpegStream::receiveFrame (Ffmpeg..</text></g><g><title>avcodec_receive_frame (libavcodec.so.58.54.100) (3,503 samples, 21.49%)</title><rect x="47.5457%" y="484" width="21.4934%" height="15" fill="rgb(217,147,25)"/><text x="47.7957%" y="494.50">avcodec_receive_frame (libavcodec...</text></g><g><title>FfmpegStream::receiveAvailFrames (FfmpegStream.cpp:178) (3,588 samples, 22.01%)</title><rect x="47.5457%" y="452" width="22.0150%" height="15" fill="rgb(247,81,37)"/><text x="47.7957%" y="462.50">FfmpegStream::receiveAvailFrames (F..</text></g><g><title>FfmpegVideoStream::sampleFrameData (FfmpegVideoStream.cpp:115) (2,981 samples, 18.29%)</title><rect x="69.9963%" y="580" width="18.2906%" height="15" fill="rgb(209,12,38)"/><text x="70.2463%" y="590.50">FfmpegVideoStream::sampleFram..</text></g><g><title>FfmpegVideoSampler::sample (FfmpegVideoSampler.cpp:83) (2,913 samples, 17.87%)</title><rect x="70.4135%" y="596" width="17.8734%" height="15" fill="rgb(227,1,9)"/><text x="70.6635%" y="606.50">FfmpegVideoSampler::sample (..</text></g><g><title>sws_scale (libswscale.so.5.5.100) (2,913 samples, 17.87%)</title><rect x="70.4135%" y="612" width="17.8734%" height="15" fill="rgb(248,47,43)"/><text x="70.6635%" y="622.50">sws_scale (libswscale.so.5.5..</text></g><g><title>FfmpegStream::receiveAvailFrames (FfmpegStream.cpp:182) (3,052 samples, 18.73%)</title><rect x="69.5668%" y="452" width="18.7262%" height="15" fill="rgb(221,10,30)"/><text x="69.8168%" y="462.50">FfmpegStream::receiveAvailFra..</text></g><g><title>std::unique_ptr&lt;DecodedFrame, std::default_delete&lt;DecodedFrame&gt; &gt;::operator bool (unique_ptr.h:346) (3,052 samples, 18.73%)</title><rect x="69.5668%" y="468" width="18.7262%" height="15" fill="rgb(210,229,1)"/><text x="69.8168%" y="478.50">std::unique_ptr&lt;DecodedFrame,..</text></g><g><title>std::unique_ptr&lt;DecodedFrame, std::default_delete&lt;DecodedFrame&gt; &gt;::get (unique_ptr.h:332) (3,052 samples, 18.73%)</title><rect x="69.5668%" y="484" width="18.7262%" height="15" fill="rgb(222,148,37)"/><text x="69.8168%" y="494.50">std::unique_ptr&lt;DecodedFrame,..</text></g><g><title>std::__uniq_ptr_impl&lt;DecodedFrame, std::default_delete&lt;DecodedFrame&gt; &gt;::_M_ptr (unique_ptr.h:147) (3,052 samples, 18.73%)</title><rect x="69.5668%" y="500" width="18.7262%" height="15" fill="rgb(234,67,33)"/><text x="69.8168%" y="510.50">std::__uniq_ptr_impl&lt;DecodedF..</text></g><g><title>FfmpegStream::getFrameData (FfmpegStream.cpp:80) (3,051 samples, 18.72%)</title><rect x="69.5730%" y="516" width="18.7201%" height="15" fill="rgb(247,98,35)"/><text x="69.8230%" y="526.50">FfmpegStream::getFrameData (F..</text></g><g><title>std::unique_ptr&lt;DecodedFrame, std::default_delete&lt;DecodedFrame&gt; &gt;::operator bool (unique_ptr.h:346) (3,051 samples, 18.72%)</title><rect x="69.5730%" y="532" width="18.7201%" height="15" fill="rgb(247,138,52)"/><text x="69.8230%" y="542.50">std::unique_ptr&lt;DecodedFrame,..</text></g><g><title>std::unique_ptr&lt;DecodedFrame, std::default_delete&lt;DecodedFrame&gt; &gt;::get (unique_ptr.h:332) (3,051 samples, 18.72%)</title><rect x="69.5730%" y="548" width="18.7201%" height="15" fill="rgb(213,79,30)"/><text x="69.8230%" y="558.50">std::unique_ptr&lt;DecodedFrame,..</text></g><g><title>std::__uniq_ptr_impl&lt;DecodedFrame, std::default_delete&lt;DecodedFrame&gt; &gt;::_M_ptr (unique_ptr.h:147) (3,051 samples, 18.72%)</title><rect x="69.5730%" y="564" width="18.7201%" height="15" fill="rgb(246,177,23)"/><text x="69.8230%" y="574.50">std::__uniq_ptr_impl&lt;DecodedF..</text></g><g><title>FfmpegDecoder::decodeLoop (FfmpegDecoder.cpp:321) (6,776 samples, 41.58%)</title><rect x="47.3678%" y="436" width="41.5757%" height="15" fill="rgb(230,62,27)"/><text x="47.6178%" y="446.50">FfmpegDecoder::decodeLoop (FfmpegDecoder.cpp:321)</text></g><g><title>video_reader::readVideo (VideoReader.cpp:193) (10,938 samples, 67.11%)</title><rect x="22.7329%" y="372" width="67.1125%" height="15" fill="rgb(216,154,8)"/><text x="22.9829%" y="382.50">video_reader::readVideo (VideoReader.cpp:193)</text></g><g><title>std::unique_ptr&lt;DecoderParameters, std::default_delete&lt;DecoderParameters&gt; &gt;::~unique_ptr (unique_ptr.h:262) (10,938 samples, 67.11%)</title><rect x="22.7329%" y="388" width="67.1125%" height="15" fill="rgb(244,35,45)"/><text x="22.9829%" y="398.50">std::unique_ptr&lt;DecoderParameters, std::default_delete&lt;DecoderParameters&gt; &gt;::~unique_ptr (unique_ptr.h:262)</text></g><g><title>FfmpegDecoder::decodeFile (FfmpegDecoder.cpp:204) (10,937 samples, 67.11%)</title><rect x="22.7390%" y="404" width="67.1064%" height="15" fill="rgb(251,115,12)"/><text x="22.9890%" y="414.50">FfmpegDecoder::decodeFile (FfmpegDecoder.cpp:204)</text></g><g><title>std::unique_ptr&lt;DecoderParameters, std::default_delete&lt;DecoderParameters&gt; &gt;::~unique_ptr (unique_ptr.h:262) (10,937 samples, 67.11%)</title><rect x="22.7390%" y="420" width="67.1064%" height="15" fill="rgb(240,54,50)"/><text x="22.9890%" y="430.50">std::unique_ptr&lt;DecoderParameters, std::default_delete&lt;DecoderParameters&gt; &gt;::~unique_ptr (unique_ptr.h:262)</text></g><g><title>GOMP_parallel (parallel.c:173) (460 samples, 2.82%)</title><rect x="90.0172%" y="820" width="2.8224%" height="15" fill="rgb(233,84,52)"/><text x="90.2672%" y="830.50">GO..</text></g><g><title>at::parallel_for&lt;at::TensorIterator::for_each(c10::function_ref&lt;void (char**, long const*, long, long)&gt;)::{lambda(long, long)#1}&gt; [clone ._omp_fn.0] (libtorch.so) (460 samples, 2.82%)</title><rect x="90.0172%" y="836" width="2.8224%" height="15" fill="rgb(207,117,47)"/><text x="90.2672%" y="846.50">at..</text></g><g><title>at::TensorIterator::serial_for_each (libtorch.so) (460 samples, 2.82%)</title><rect x="90.0172%" y="852" width="2.8224%" height="15" fill="rgb(249,43,39)"/><text x="90.2672%" y="862.50">at..</text></g><g><title>c10::function_ref&lt;void (char**, long const*, long, long)&gt;::callback_fn&lt;at::TensorIterator::for_each(c10::function_ref&lt;void (char**, long const*, long)&gt;)::{lambda(char**, long const*, long, long)#1}&gt; (libtorch.so) (460 samples, 2.82%)</title><rect x="90.0172%" y="868" width="2.8224%" height="15" fill="rgb(209,38,44)"/><text x="90.2672%" y="878.50">c1..</text></g><g><title>c10::function_ref&lt;void (char**, long const*, long)&gt;::callback_fn&lt;void at::native::(anonymous namespace)::cpu_kernel_vec&lt;at::native::(anonymous namespace)::fill_kernel(at::TensorIterator&amp;, c10::Scalar)::{lambda()#2}::operator()() const::{lambda()#1}::operator()() const::{lambda()#1}, at::native::(anonymous namespace)::fill_kernel(at::TensorIterator&amp;, c10::Scalar)::{lambda()#2}::operator()() const::{lambda()#1}::operator()() const::{lambda()#2}&gt;(at::TensorIterator&amp;, at::native::(anonymous namespace)::fill_kernel(at::TensorIterator&amp;, c10::Scalar)::{lambda()#2}::operator()() const::{lambda()#1}::operator()() const::{lambda()#1}, at::native::(anonymous namespace)::fill_kernel(at::TensorIterator&amp;, c10::Scalar)::{lambda()#2}::operator()() const::{lambda()#1}::operator()() const::{lambda()#2})::{lambda(char**, long const*, long)#1}&gt; (libtorch.so) (460 samples, 2.82%)</title><rect x="90.0172%" y="884" width="2.8224%" height="15" fill="rgb(236,212,23)"/><text x="90.2672%" y="894.50">c1..</text></g><g><title>at::Tensor::zero_ (libtorch_python.so) (629 samples, 3.86%)</title><rect x="89.8883%" y="660" width="3.8594%" height="15" fill="rgb(242,79,21)"/><text x="90.1383%" y="670.50">at::..</text></g><g><title>at::CPUType::(anonymous namespace)::zero_ (libtorch.so) (629 samples, 3.86%)</title><rect x="89.8883%" y="676" width="3.8594%" height="15" fill="rgb(211,96,35)"/><text x="90.1383%" y="686.50">at::..</text></g><g><title>at::native::zero_ (libtorch.so) (629 samples, 3.86%)</title><rect x="89.8883%" y="692" width="3.8594%" height="15" fill="rgb(253,215,40)"/><text x="90.1383%" y="702.50">at::..</text></g><g><title>at::Tensor::fill_ (libtorch_python.so) (629 samples, 3.86%)</title><rect x="89.8883%" y="708" width="3.8594%" height="15" fill="rgb(211,81,21)"/><text x="90.1383%" y="718.50">at::..</text></g><g><title>at::TypeDefault::fill_ (libtorch.so) (629 samples, 3.86%)</title><rect x="89.8883%" y="724" width="3.8594%" height="15" fill="rgb(208,190,38)"/><text x="90.1383%" y="734.50">at::..</text></g><g><title>at::native::fill_out (libtorch.so) (629 samples, 3.86%)</title><rect x="89.8883%" y="740" width="3.8594%" height="15" fill="rgb(235,213,38)"/><text x="90.1383%" y="750.50">at::..</text></g><g><title>at::native::(anonymous namespace)::fill_kernel (libtorch.so) (629 samples, 3.86%)</title><rect x="89.8883%" y="756" width="3.8594%" height="15" fill="rgb(237,122,38)"/><text x="90.1383%" y="766.50">at::..</text></g><g><title>at::native::(anonymous namespace)::fill_kernel(at::TensorIterator&amp;, c10::Scalar)::{lambda()#2}::operator() const (libtorch.so) (629 samples, 3.86%)</title><rect x="89.8883%" y="772" width="3.8594%" height="15" fill="rgb(244,218,35)"/><text x="90.1383%" y="782.50">at::..</text></g><g><title>at::TensorIterator::for_each (libtorch.so) (629 samples, 3.86%)</title><rect x="89.8883%" y="788" width="3.8594%" height="15" fill="rgb(240,68,47)"/><text x="90.1383%" y="798.50">at::..</text></g><g><title>at::TensorIterator::for_each (libtorch.so) (629 samples, 3.86%)</title><rect x="89.8883%" y="804" width="3.8594%" height="15" fill="rgb(210,16,53)"/><text x="90.1383%" y="814.50">at::..</text></g><g><title>at::Tensor::operator= &amp; (TensorBody.h:162) (635 samples, 3.90%)</title><rect x="89.8883%" y="388" width="3.8962%" height="15" fill="rgb(235,124,12)"/><text x="90.1383%" y="398.50">at::..</text></g><g><title>c10::intrusive_ptr&lt;c10::TensorImpl, c10::UndefinedTensorImpl&gt;::operator= &amp; (intrusive_ptr.h:248) (635 samples, 3.90%)</title><rect x="89.8883%" y="404" width="3.8962%" height="15" fill="rgb(224,169,11)"/><text x="90.1383%" y="414.50">c10:..</text></g><g><title>c10::intrusive_ptr&lt;c10::TensorImpl, c10::UndefinedTensorImpl&gt;::operator=&lt;c10::TensorImpl, c10::UndefinedTensorImpl&gt; &amp; (intrusive_ptr.h:257) (635 samples, 3.90%)</title><rect x="89.8883%" y="420" width="3.8962%" height="15" fill="rgb(250,166,2)"/><text x="90.1383%" y="430.50">c10:..</text></g><g><title>c10::intrusive_ptr&lt;c10::TensorImpl, c10::UndefinedTensorImpl&gt;::intrusive_ptr (intrusive_ptr.h:217) (635 samples, 3.90%)</title><rect x="89.8883%" y="436" width="3.8962%" height="15" fill="rgb(242,216,29)"/><text x="90.1383%" y="446.50">c10:..</text></g><g><title>torch::zeros (variable_factories.h:1834) (635 samples, 3.90%)</title><rect x="89.8883%" y="452" width="3.8962%" height="15" fill="rgb(230,116,27)"/><text x="90.1383%" y="462.50">torc..</text></g><g><title>torch::zeros(c10::ArrayRef&lt;long&gt;, c10::TensorOptions const&amp;)::{lambda()#1}::operator() const (variable_factories.h:1832) (635 samples, 3.90%)</title><rect x="89.8883%" y="468" width="3.8962%" height="15" fill="rgb(228,99,48)"/><text x="90.1383%" y="478.50">torc..</text></g><g><title>at::AutoNonVariableTypeMode::~AutoNonVariableTypeMode (LegacyTypeDispatch.h:81) (635 samples, 3.90%)</title><rect x="89.8883%" y="484" width="3.8962%" height="15" fill="rgb(253,11,6)"/><text x="90.1383%" y="494.50">at::..</text></g><g><title>c10::LeftRight&lt;c10::DispatchTable&gt;::read&lt;at::Tensor c10::Dispatcher::callUnboxedOnly&lt;at::Tensor, c10::ArrayRef&lt;long&gt;, c10::TensorOptions const&amp;&gt;(c10::OperatorHandle const&amp;, c10::ArrayRef&lt;long&gt;, c10::TensorOptions const&amp;) const::{lambda(c10::DispatchTable const&amp;)#1}&gt; (LeftRight.h:74) (635 samples, 3.90%)</title><rect x="89.8883%" y="500" width="3.8962%" height="15" fill="rgb(247,143,39)"/><text x="90.1383%" y="510.50">c10:..</text></g><g><title>at::Tensor c10::Dispatcher::callUnboxedOnly&lt;at::Tensor, c10::ArrayRef&lt;long&gt;, c10::TensorOptions const&amp;&gt;(c10::OperatorHandle const&amp;, c10::ArrayRef&lt;long&gt;, c10::TensorOptions const&amp;) const::{lambda(c10::DispatchTable const&amp;)#1}::operator() const (Dispatcher.h:201) (635 samples, 3.90%)</title><rect x="89.8883%" y="516" width="3.8962%" height="15" fill="rgb(236,97,10)"/><text x="90.1383%" y="526.50">at::..</text></g><g><title>c10::Dispatcher::doCallUnboxedOnly&lt;at::Tensor, c10::ArrayRef&lt;long&gt;, c10::TensorOptions const&amp;&gt; (Dispatcher.h:212) (635 samples, 3.90%)</title><rect x="89.8883%" y="532" width="3.8962%" height="15" fill="rgb(233,208,19)"/><text x="90.1383%" y="542.50">c10:..</text></g><g><title>c10::LeftRight&lt;ska::flat_hash_map&lt;c10::TensorTypeId, c10::KernelFunction, std::hash&lt;c10::TensorTypeId&gt;, std::equal_to&lt;c10::TensorTypeId&gt;, std::allocator&lt;std::pair&lt;c10::TensorTypeId, c10::KernelFunction&gt; &gt; &gt; &gt;::read&lt;at::Tensor c10::Dispatcher::doCallUnboxedOnly&lt;at::Tensor, c10::ArrayRef&lt;long&gt;, c10::TensorOptions const&amp;&gt;(c10::DispatchTable const&amp;, c10::LeftRight&lt;ska::flat_hash_map&lt;c10::TensorTypeId, c10::KernelFunction, std::hash&lt;c10::TensorTypeId&gt;, std::equal_to&lt;c10::TensorTypeId&gt;, std::allocator&lt;std::pair&lt;c10::TensorTypeId, c10::KernelFunction&gt; &gt; &gt; &gt; const&amp;, c10::ArrayRef&lt;long&gt;, c10::TensorOptions const&amp;) const::{lambda(ska::flat_hash_map&lt;c10::TensorTypeId, c10::KernelFunction, std::hash&lt;c10::TensorTypeId&gt;, std::equal_to&lt;c10::TensorTypeId&gt;, std::allocator&lt;std::pair&lt;c10::TensorTypeId, c10::KernelFunction&gt; &gt; &gt; const&amp;)#1}&gt; (LeftRight.h:68) (635 samples, 3.90%)</title><rect x="89.8883%" y="548" width="3.8962%" height="15" fill="rgb(216,164,2)"/><text x="90.1383%" y="558.50">c10:..</text></g><g><title>c10::detail::IncrementRAII::~IncrementRAII (LeftRight.h:19) (635 samples, 3.90%)</title><rect x="89.8883%" y="564" width="3.8962%" height="15" fill="rgb(220,129,5)"/><text x="90.1383%" y="574.50">c10:..</text></g><g><title>std::__atomic_base&lt;int&gt;::operator-- (atomic_base.h:304) (635 samples, 3.90%)</title><rect x="89.8883%" y="580" width="3.8962%" height="15" fill="rgb(242,17,10)"/><text x="90.1383%" y="590.50">std:..</text></g><g><title>c10::KernelFunction::callUnboxedOnly&lt;at::Tensor, c10::ArrayRef&lt;long&gt;, c10::TensorOptions const&amp;&gt; (libtorch_python.so) (635 samples, 3.90%)</title><rect x="89.8883%" y="596" width="3.8962%" height="15" fill="rgb(242,107,0)"/><text x="90.1383%" y="606.50">c10:..</text></g><g><title>c10::detail::wrap_kernel_functor_unboxed_&lt;c10::detail::WrapRuntimeKernelFunctor_&lt;at::Tensor (*)(c10::ArrayRef&lt;long&gt;, c10::TensorOptions const&amp;), at::Tensor, c10::guts::typelist::typelist&lt;c10::ArrayRef&lt;long&gt;, c10::TensorOptions const&amp;&gt; &gt;, at::Tensor(c10::ArrayRef&lt;long&gt;, c10::TensorOptions const&amp;)&gt;::call (libtorch.so) (635 samples, 3.90%)</title><rect x="89.8883%" y="612" width="3.8962%" height="15" fill="rgb(251,28,31)"/><text x="90.1383%" y="622.50">c10:..</text></g><g><title>at::TypeDefault::zeros (libtorch.so) (635 samples, 3.90%)</title><rect x="89.8883%" y="628" width="3.8962%" height="15" fill="rgb(233,223,10)"/><text x="90.1383%" y="638.50">at::..</text></g><g><title>at::native::zeros (libtorch.so) (635 samples, 3.90%)</title><rect x="89.8883%" y="644" width="3.8962%" height="15" fill="rgb(215,21,27)"/><text x="90.1383%" y="654.50">at::..</text></g><g><title>video_reader::readVideo (VideoReader.cpp:215) (637 samples, 3.91%)</title><rect x="89.8883%" y="372" width="3.9085%" height="15" fill="rgb(232,23,21)"/><text x="90.1383%" y="382.50">vide..</text></g><g><title>0x7f1e8aa18bc6 (libc-2.27.so) (187 samples, 1.15%)</title><rect x="95.7664%" y="420" width="1.1474%" height="15" fill="rgb(244,5,23)"/><text x="96.0164%" y="430.50"></text></g><g><title>video_reader::readVideo (VideoReader.cpp:226) (941 samples, 5.77%)</title><rect x="93.8336%" y="372" width="5.7737%" height="15" fill="rgb(226,81,46)"/><text x="94.0836%" y="382.50">video_r..</text></g><g><title>c10::TensorOptions::TensorOptions (TensorOptions.h:143) (932 samples, 5.72%)</title><rect x="93.8888%" y="388" width="5.7185%" height="15" fill="rgb(247,70,30)"/><text x="94.1388%" y="398.50">c10::Te..</text></g><g><title>video_reader::fillVideoTensor (VideoReader.cpp:73) (927 samples, 5.69%)</title><rect x="93.9195%" y="404" width="5.6878%" height="15" fill="rgb(212,68,19)"/><text x="94.1695%" y="414.50">video_r..</text></g><g><title>std::string::~string (basic_string.h:3630) (12,567 samples, 77.11%)</title><rect x="22.5549%" y="340" width="77.1076%" height="15" fill="rgb(240,187,13)"/><text x="22.8049%" y="350.50">std::string::~string (basic_string.h:3630)</text></g><g><title>std::string::_M_rep (basic_string.h:3312) (12,567 samples, 77.11%)</title><rect x="22.5549%" y="356" width="77.1076%" height="15" fill="rgb(223,113,26)"/><text x="22.8049%" y="366.50">std::string::_M_rep (basic_string.h:3312)</text></g><g><title>c10::detail::wrap_kernel_functor_boxed&lt;c10::detail::WrapRuntimeKernelFunctor_&lt;c10::List&lt;at::Tensor&gt; (*)(std::string, double, long, long, long, long, long, long, long, long, long, long, long, long, long, long, long, long), c10::List&lt;at::Tensor&gt;, c10::guts::typelist::typelist&lt;std::string, double, long, long, long, long, long, long, long, long, long, long, long, long, long, long, long, long&gt; &gt;, true, void&gt;::call (kernel_functor.h:235) (12,569 samples, 77.12%)</title><rect x="22.5488%" y="196" width="77.1199%" height="15" fill="rgb(206,192,2)"/><text x="22.7988%" y="206.50">c10::detail::wrap_kernel_functor_boxed&lt;c10::detail::WrapRuntimeKernelFunctor_&lt;c10::List&lt;at::Tensor&gt; (*)(std::string, double, lon..</text></g><g><title>drop (stack.h:48) (12,569 samples, 77.12%)</title><rect x="22.5488%" y="212" width="77.1199%" height="15" fill="rgb(241,108,4)"/><text x="22.7988%" y="222.50">drop (stack.h:48)</text></g><g><title>std::vector&lt;c10::IValue, std::allocator&lt;c10::IValue&gt; &gt;::end (stl_vector.h:582) (12,569 samples, 77.12%)</title><rect x="22.5488%" y="228" width="77.1199%" height="15" fill="rgb(247,173,49)"/><text x="22.7988%" y="238.50">std::vector&lt;c10::IValue, std::allocator&lt;c10::IValue&gt; &gt;::end (stl_vector.h:582)</text></g><g><title>__gnu_cxx::__normal_iterator&lt;c10::IValue*, std::vector&lt;c10::IValue, std::allocator&lt;c10::IValue&gt; &gt; &gt;::__normal_iterator (stl_iterator.h:783) (12,569 samples, 77.12%)</title><rect x="22.5488%" y="244" width="77.1199%" height="15" fill="rgb(224,114,35)"/><text x="22.7988%" y="254.50">__gnu_cxx::__normal_iterator&lt;c10::IValue*, std::vector&lt;c10::IValue, std::allocator&lt;c10::IValue&gt; &gt; &gt;::__normal_iterator (stl_iter..</text></g><g><title>c10::detail::call_functor_with_args_from_stack_&lt;c10::detail::WrapRuntimeKernelFunctor_&lt;c10::List&lt;at::Tensor&gt; (*)(std::string, double, long, long, long, long, long, long, long, long, long, long, long, long, long, long, long, long), c10::List&lt;at::Tensor&gt;, c10::guts::typelist::typelist&lt;std::string, double, long, long, long, long, long, long, long, long, long, long, long, long, long, long, long, long&gt; &gt;, true, (unsigned long)0, (unsigned long)1, (unsigned long)2, (unsigned long)3, (unsigned long)4, (unsigned long)5, (unsigned long)6, (unsigned long)7, (unsigned long)8, (unsigned long)9, (unsigned long)10, (unsigned long)11, (unsigned long)12, (unsigned long)13, (unsigned long)14, (unsigned long)15, (unsigned long)16, (unsigned long)17&gt; (kernel_functor.h:196) (12,569 samples, 77.12%)</title><rect x="22.5488%" y="260" width="77.1199%" height="15" fill="rgb(245,159,27)"/><text x="22.7988%" y="270.50">c10::detail::call_functor_with_args_from_stack_&lt;c10::detail::WrapRuntimeKernelFunctor_&lt;c10::List&lt;at::Tensor&gt; (*)(std::string, do..</text></g><g><title>c10::detail::WrapRuntimeKernelFunctor_&lt;c10::List&lt;at::Tensor&gt; (*)(std::string, double, long, long, long, long, long, long, long, long, long, long, long, long, long, long, long, long), c10::List&lt;at::Tensor&gt;, c10::guts::typelist::typelist&lt;std::string, double, long, long, long, long, long, long, long, long, long, long, long, long, long, long, long, long&gt; &gt;::operator() (kernel_lambda.h:23) (12,569 samples, 77.12%)</title><rect x="22.5488%" y="276" width="77.1199%" height="15" fill="rgb(245,172,44)"/><text x="22.7988%" y="286.50">c10::detail::WrapRuntimeKernelFunctor_&lt;c10::List&lt;at::Tensor&gt; (*)(std::string, double, long, long, long, long, long, long, long, ..</text></g><g><title>std::string::~string (basic_string.h:3630) (12,568 samples, 77.11%)</title><rect x="22.5549%" y="292" width="77.1138%" height="15" fill="rgb(236,23,11)"/><text x="22.8049%" y="302.50">std::string::~string (basic_string.h:3630)</text></g><g><title>std::string::_M_rep (basic_string.h:3312) (12,568 samples, 77.11%)</title><rect x="22.5549%" y="308" width="77.1138%" height="15" fill="rgb(205,117,38)"/><text x="22.8049%" y="318.50">std::string::_M_rep (basic_string.h:3312)</text></g><g><title>video_reader::readVideoFromFile (VideoReader.cpp:384) (12,568 samples, 77.11%)</title><rect x="22.5549%" y="324" width="77.1138%" height="15" fill="rgb(237,72,25)"/><text x="22.8049%" y="334.50">video_reader::readVideoFromFile (VideoReader.cpp:384)</text></g><g><title>torch::jit::(anonymous namespace)::createOperatorFromC10(c10::OperatorHandle const&amp;)::{lambda(std::vector&lt;c10::IValue, std::allocator&lt;c10::IValue&gt; &gt;&amp;)#1}::operator() const (libtorch.so) (12,570 samples, 77.13%)</title><rect x="22.5488%" y="164" width="77.1260%" height="15" fill="rgb(244,70,9)"/><text x="22.7988%" y="174.50">torch::jit::(anonymous namespace)::createOperatorFromC10(c10::OperatorHandle const&amp;)::{lambda(std::vector&lt;c10::IValue, std::allo..</text></g><g><title>c10::KernelFunction::callBoxed (libtorch.so) (12,570 samples, 77.13%)</title><rect x="22.5488%" y="180" width="77.1260%" height="15" fill="rgb(217,125,39)"/><text x="22.7988%" y="190.50">c10::KernelFunction::callBoxed (libtorch.so)</text></g><g><title>_read_video_from_file (torchvision/io/_video_opt.py:137) (15,384 samples, 94.39%)</title><rect x="5.2890%" y="100" width="94.3919%" height="15" fill="rgb(235,36,10)"/><text x="5.5390%" y="110.50">_read_video_from_file (torchvision/io/_video_opt.py:137)</text></g><g><title>pybind11::cpp_function::dispatcher (libtorch_python.so) (12,571 samples, 77.13%)</title><rect x="22.5488%" y="116" width="77.1322%" height="15" fill="rgb(251,123,47)"/><text x="22.7988%" y="126.50">pybind11::cpp_function::dispatcher (libtorch_python.so)</text></g><g><title>void pybind11::cpp_function::initialize&lt;torch::jit::initJITBindings(_object*)::{lambda(std::string const&amp;)#54}::operator()(std::string const&amp;) const::{lambda(pybind11::args, pybind11::kwargs)#1}, pybind11::object, pybind11::args, pybind11::kwargs, pybind11::name, pybind11::doc&gt;(torch::jit::initJITBindings(_object*)::{lambda(std::string const&amp;)#54}::operator()(std::string const&amp;) const::{lambda(pybind11::args&amp;&amp;, pybind11::kwargs)#1}, pybind11::object (*)(pybind11::args, pybind11::kwargs), pybind11::name const, pybind11::doc&amp;)::{lambda(pybind11::detail::function_call&amp;)#3}::_FUN (libtorch_python.so) (12,571 samples, 77.13%)</title><rect x="22.5488%" y="132" width="77.1322%" height="15" fill="rgb(221,13,13)"/><text x="22.7988%" y="142.50">void pybind11::cpp_function::initialize&lt;torch::jit::initJITBindings(_object*)::{lambda(std::string const&amp;)#54}::operator()(std::..</text></g><g><title>torch::jit::invokeOperatorFromPython (libtorch_python.so) (12,571 samples, 77.13%)</title><rect x="22.5488%" y="148" width="77.1322%" height="15" fill="rgb(238,131,9)"/><text x="22.7988%" y="158.50">torch::jit::invokeOperatorFromPython (libtorch_python.so)</text></g><g><title>&lt;module&gt; (profile_tvvr_long.py:14) (16,204 samples, 99.42%)</title><rect x="0.3743%" y="52" width="99.4232%" height="15" fill="rgb(211,50,8)"/><text x="0.6243%" y="62.50">&lt;module&gt; (profile_tvvr_long.py:14)</text></g><g><title>read_video (torchvision/io/video.py:212) (16,062 samples, 98.55%)</title><rect x="1.2456%" y="68" width="98.5520%" height="15" fill="rgb(245,182,24)"/><text x="1.4956%" y="78.50">read_video (torchvision/io/video.py:212)</text></g><g><title>_read_video (torchvision/io/_video_opt.py:393) (15,405 samples, 94.52%)</title><rect x="5.2767%" y="84" width="94.5208%" height="15" fill="rgb(242,14,37)"/><text x="5.5267%" y="94.50">_read_video (torchvision/io/_video_opt.py:393)</text></g><g><title>all (16,298 samples, 100%)</title><rect x="0.0000%" y="36" width="100.0000%" height="15" fill="rgb(246,228,12)"/><text x="0.2500%" y="46.50"></text></g></svg></svg>
