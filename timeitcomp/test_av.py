@@ -73,6 +73,11 @@ def get_tvvr(path):
     vframes, _, _ = torchvision.io.read_video(path)
     print("TVVR", len(vframes))
 
+setup_decord = """\
+from decord import VideoReader
+from decord import cpu, gpu
+"""
+
 def get_decord(path):
     images_d = []
     vr = VideoReader(path, ctx=cpu(0))
@@ -86,39 +91,58 @@ def get_decord(path):
 loaders = []
 times = []
 video = []
+num_frames = []
+tv_version = []
 
 for i in range(100):
     for file in os.listdir("../videos"):
         if file in ["README", ".ipynb_checkpoints"]:
             print("Skipping README")
             continue
+
         
         path = os.path.join("../videos/", file)
         print(path)
+        vframes, _, _ = torchvision.io.read_video(path)
+        nframes = len(vframes)
+        tv_version.append(torchvision.__version__)
+
 
         times.append(timeit.timeit(f"get_cv2(\"{path}\")", setup=setup_cv2, globals=globals(), number=NUBMER_TRIALS)/NUBMER_TRIALS)
         video.append(file)
         loaders.append("CV2")
+        num_frames.append(nframes)
+        tv_version.append(torchvision.__version__)
 
         times.append( timeit.timeit(f"get_pyav(\"{path}\")", setup=setup_pyav, globals=globals(), number=NUBMER_TRIALS)/NUBMER_TRIALS)
         video.append(file)
         loaders.append("pyav")
+        num_frames.append(nframes)
+        tv_version.append(torchvision.__version__)
 
         times.append( timeit.timeit(f"get_pyavnononsense(\"{path}\")", setup=setup_pyav, globals=globals(), number=NUBMER_TRIALS)/NUBMER_TRIALS)
         video.append(file)
         loaders.append("pyav_notorgb")
+        num_frames.append(nframes)
+        tv_version.append(torchvision.__version__)
 
         times.append( timeit.timeit(f"get_tv(\"{path}\")", setup=setup_tv, globals=globals(), number=NUBMER_TRIALS)/NUBMER_TRIALS)
         video.append(file)
         loaders.append("tv_pyav")
+        num_frames.append(nframes)
+        tv_version.append(torchvision.__version__)
 
         times.append( timeit.timeit(f"get_tvvr(\"{path}\")", setup=setup_tvvr, globals=globals(), number=NUBMER_TRIALS)/NUBMER_TRIALS)
         video.append(file)
         loaders.append("tv_vr")
+        num_frames.append(nframes)
+        tv_version.append(torchvision.__version__)
 
-        times.append( timeit.timeit(f"get_decord(\"{path}\")", setup=setup_tvvr, globals=globals(), number=NUBMER_TRIALS)/NUBMER_TRIALS)
+        times.append( timeit.timeit(f"get_decord(\"{path}\")", setup=setup_decord, globals=globals(), number=NUBMER_TRIALS)/NUBMER_TRIALS)
         video.append(file)
         loaders.append("decord")
+        num_frames.append(nframes)
+        tv_version.append(torchvision.__version__)
 
 df = pd.DataFrame({"loader": loaders, "video": video, "time":times})
 df.to_csv("basic_reading_speeds.csv")
