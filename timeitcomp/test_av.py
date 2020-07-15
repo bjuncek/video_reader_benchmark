@@ -25,6 +25,13 @@ def get_pyav(path):
         images_av.append(frame.to_rgb().to_ndarray())
     print("PYAV", len(images_av))
 
+def get_pyavnononsense(path): 
+    images_av = []
+    container = av.open(path)
+    container.streams.video[0].thread_count = 1  # force single thread
+    for frame in container.decode(video=0):
+        images_av.append(frame)
+    print("PYAV", len(images_av))
 
 setup_cv2 = """\
 import torch
@@ -80,13 +87,13 @@ loaders = []
 times = []
 video = []
 
-for i in range(10):
+for i in range(100):
     for file in os.listdir("../videos"):
         if file in ["README", ".ipynb_checkpoints"]:
             print("Skipping README")
             continue
         
-        path = os.path.join("./videos/", file)
+        path = os.path.join("../videos/", file)
         print(path)
 
         times.append(timeit.timeit(f"get_cv2(\"{path}\")", setup=setup_cv2, globals=globals(), number=NUBMER_TRIALS)/NUBMER_TRIALS)
@@ -96,6 +103,10 @@ for i in range(10):
         times.append( timeit.timeit(f"get_pyav(\"{path}\")", setup=setup_pyav, globals=globals(), number=NUBMER_TRIALS)/NUBMER_TRIALS)
         video.append(file)
         loaders.append("pyav")
+
+        times.append( timeit.timeit(f"get_pyavnononsense(\"{path}\")", setup=setup_pyav, globals=globals(), number=NUBMER_TRIALS)/NUBMER_TRIALS)
+        video.append(file)
+        loaders.append("pyav_notorgb")
 
         times.append( timeit.timeit(f"get_tv(\"{path}\")", setup=setup_tv, globals=globals(), number=NUBMER_TRIALS)/NUBMER_TRIALS)
         video.append(file)

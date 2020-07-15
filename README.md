@@ -17,7 +17,7 @@ conda install -y pytorch torchvision -c pytorch
 
 # genral setup
 conda install -y -c conda-forge jupyterlab
-conda install -y pandas, seaborn
+conda install -y seaborn matplotlib pandas
 
 # first setting up pyav
 conda install -y av -c conda-forge
@@ -33,5 +33,7 @@ mkdir -p ~/bin; cd bin
 git clone git@github.com:pytorch/vision.git
 cd vision
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
+
+
 
 ```
