@@ -6,7 +6,7 @@ videos = [os.path.join("../videos/", x) for x in os.listdir("../videos") if x no
 
 print("Now starting video decoding for profile")
 
-for i in range(100):
+for i in range(1000):
     for path in videos:
         images_cv2 = []
         cv2.setNumThreads(1)
