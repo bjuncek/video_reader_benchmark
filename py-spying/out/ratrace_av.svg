@@ -1,0 +1,419 @@
+<?xml version="1.0" standalone="no"?><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"><svg version="1.1" width="1200" height="310" onload="init(evt)" viewBox="0 0 1200 310" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><!--Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples.--><!--NOTES: --><defs><linearGradient id="background" y1="0" y2="1" x1="0" x2="0"><stop stop-color="#eeeeee" offset="5%"/><stop stop-color="#eeeeb0" offset="95%"/></linearGradient></defs><style type="text/css">
+text { font-family:"Verdana"; font-size:12px; fill:rgb(0,0,0); }
+#title { text-anchor:middle; font-size:17px; }
+#search { opacity:0.1; cursor:pointer; }
+#search:hover, #search.show { opacity:1; }
+#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+#unzoom { cursor:pointer; }
+#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+.hide { display:none; }
+.parent { opacity:0.5; }
+</style><script type="text/ecmascript"><![CDATA[var nametype = 'Function:';
+var fontsize = 12;
+var fontwidth = 0.59;
+var xpad = 10;
+var inverted = true;
+var searchcolor = 'rgb(230,0,230)';
+var fluiddrawing = true;
+var truncate_text_right = false;]]><![CDATA["use strict";
+var details, searchbtn, unzoombtn, matchedtxt, svg, searching, frames;
+function init(evt) {
+    details = document.getElementById("details").firstChild;
+    searchbtn = document.getElementById("search");
+    unzoombtn = document.getElementById("unzoom");
+    matchedtxt = document.getElementById("matched");
+    svg = document.getElementsByTagName("svg")[0];
+    frames = document.getElementById("frames");
+    searching = 0;
+
+    // Use GET parameters to restore a flamegraph's state.
+    var restore_state = function() {
+        var params = get_params();
+        if (params.x && params.y)
+            zoom(find_group(document.querySelector('[x="' + params.x + '"][y="' + params.y + '"]')));
+        if (params.s)
+            search(params.s);
+    };
+
+    if (fluiddrawing) {
+        // Make width dynamic so the SVG fits its parent's width.
+        svg.removeAttribute("width");
+        // Edge requires us to have a viewBox that gets updated with size changes.
+        var isEdge = /Edge\/\d./i.test(navigator.userAgent);
+        if (!isEdge) {
+          svg.removeAttribute("viewBox");
+        }
+        var update_for_width_change = function() {
+            if (isEdge) {
+                svg.attributes.viewBox.value = "0 0 " + svg.width.baseVal.value + " " + svg.height.baseVal.value;
+            }
+
+            // Keep consistent padding on left and right of frames container.
+            frames.attributes.width.value = svg.width.baseVal.value - xpad * 2;
+
+            // Text truncation needs to be adjusted for the current width.
+            var el = frames.children;
+            for(var i = 0; i < el.length; i++) {
+                update_text(el[i]);
+            }
+
+            // Keep search elements at a fixed distance from right edge.
+            var svgWidth = svg.width.baseVal.value;
+            searchbtn.attributes.x.value = svgWidth - xpad - 100;
+            matchedtxt.attributes.x.value = svgWidth - xpad - 100;
+        };
+        window.addEventListener('resize', function() {
+            update_for_width_change();
+        });
+        // This needs to be done asynchronously for Safari to work.
+        setTimeout(function() {
+            unzoom();
+            update_for_width_change();
+            restore_state();
+        }, 0);
+    } else {
+        restore_state();
+    }
+}
+// event listeners
+window.addEventListener("click", function(e) {
+    var target = find_group(e.target);
+    if (target) {
+        if (target.nodeName == "a") {
+            if (e.ctrlKey === false) return;
+            e.preventDefault();
+        }
+        if (target.classList.contains("parent")) unzoom();
+        zoom(target);
+
+        // set parameters for zoom state
+        var el = target.querySelector("rect");
+        if (el && el.attributes && el.attributes.y && el.attributes._orig_x) {
+            var params = get_params()
+            params.x = el.attributes._orig_x.value;
+            params.y = el.attributes.y.value;
+            history.replaceState(null, null, parse_params(params));
+        }
+    }
+    else if (e.target.id == "unzoom") {
+        unzoom();
+
+        // remove zoom state
+        var params = get_params();
+        if (params.x) delete params.x;
+        if (params.y) delete params.y;
+        history.replaceState(null, null, parse_params(params));
+    }
+    else if (e.target.id == "search") search_prompt();
+}, false)
+// mouse-over for info
+// show
+window.addEventListener("mouseover", function(e) {
+    var target = find_group(e.target);
+    if (target) details.nodeValue = nametype + " " + g_to_text(target);
+}, false)
+// clear
+window.addEventListener("mouseout", function(e) {
+    var target = find_group(e.target);
+    if (target) details.nodeValue = ' ';
+}, false)
+// ctrl-F for search
+window.addEventListener("keydown",function (e) {
+    if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+        e.preventDefault();
+        search_prompt();
+    }
+}, false)
+// functions
+function get_params() {
+    var params = {};
+    var paramsarr = window.location.search.substr(1).split('&');
+    for (var i = 0; i < paramsarr.length; ++i) {
+        var tmp = paramsarr[i].split("=");
+        if (!tmp[0] || !tmp[1]) continue;
+        params[tmp[0]]  = decodeURIComponent(tmp[1]);
+    }
+    return params;
+}
+function parse_params(params) {
+    var uri = "?";
+    for (var key in params) {
+        uri += key + '=' + encodeURIComponent(params[key]) + '&';
+    }
+    if (uri.slice(-1) == "&")
+        uri = uri.substring(0, uri.length - 1);
+    if (uri == '?')
+        uri = window.location.href.split('?')[0];
+    return uri;
+}
+function find_child(node, selector) {
+    var children = node.querySelectorAll(selector);
+    if (children.length) return children[0];
+    return;
+}
+function find_group(node) {
+    var parent = node.parentElement;
+    if (!parent) return;
+    if (parent.id == "frames") return node;
+    return find_group(parent);
+}
+function orig_save(e, attr, val) {
+    if (e.attributes["_orig_" + attr] != undefined) return;
+    if (e.attributes[attr] == undefined) return;
+    if (val == undefined) val = e.attributes[attr].value;
+    e.setAttribute("_orig_" + attr, val);
+}
+function orig_load(e, attr) {
+    if (e.attributes["_orig_"+attr] == undefined) return;
+    e.attributes[attr].value = e.attributes["_orig_" + attr].value;
+    e.removeAttribute("_orig_" + attr);
+}
+function g_to_text(e) {
+    var text = find_child(e, "title").firstChild.nodeValue;
+    return (text)
+}
+function g_to_func(e) {
+    var func = g_to_text(e);
+    // if there's any manipulation we want to do to the function
+    // name before it's searched, do it here before returning.
+    return (func);
+}
+function update_text(e) {
+    var r = find_child(e, "rect");
+    var t = find_child(e, "text");
+    var w = parseFloat(r.attributes.width.value) * frames.attributes.width.value / 100 - 3;
+    var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+    t.attributes.x.value = format_percent((parseFloat(r.attributes.x.value) + (100 * 3 / frames.attributes.width.value)));
+    // Smaller than this size won't fit anything
+    if (w < 2 * fontsize * fontwidth) {
+        t.textContent = "";
+        return;
+    }
+    t.textContent = txt;
+    // Fit in full text width
+    if (/^ *\$/.test(txt) || t.getComputedTextLength() < w)
+        return;
+    if (truncate_text_right) {
+        // Truncate the right side of the text.
+        for (var x = txt.length - 2; x > 0; x--) {
+            if (t.getSubStringLength(0, x + 2) <= w) {
+                t.textContent = txt.substring(0, x) + "..";
+                return;
+            }
+        }
+    } else {
+        // Truncate the left side of the text.
+        for (var x = 2; x < txt.length; x++) {
+            if (t.getSubStringLength(x - 2, txt.length) <= w) {
+                t.textContent = ".." + txt.substring(x, txt.length);
+                return;
+            }
+        }
+    }
+    t.textContent = "";
+}
+// zoom
+function zoom_reset(e) {
+    if (e.attributes != undefined) {
+        orig_load(e, "x");
+        orig_load(e, "width");
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_reset(c[i]);
+    }
+}
+function zoom_child(e, x, ratio) {
+    if (e.attributes != undefined) {
+        if (e.attributes.x != undefined) {
+            orig_save(e, "x");
+            e.attributes.x.value = format_percent((parseFloat(e.attributes.x.value) - x) * ratio);
+            if (e.tagName == "text") {
+                e.attributes.x.value = format_percent(parseFloat(find_child(e.parentNode, "rect[x]").attributes.x.value) + (100 * 3 / frames.attributes.width.value));
+            }
+        }
+        if (e.attributes.width != undefined) {
+            orig_save(e, "width");
+            e.attributes.width.value = format_percent(parseFloat(e.attributes.width.value) * ratio);
+        }
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_child(c[i], x, ratio);
+    }
+}
+function zoom_parent(e) {
+    if (e.attributes) {
+        if (e.attributes.x != undefined) {
+            orig_save(e, "x");
+            e.attributes.x.value = "0.0%";
+        }
+        if (e.attributes.width != undefined) {
+            orig_save(e, "width");
+            e.attributes.width.value = "100.0%";
+        }
+    }
+    if (e.childNodes == undefined) return;
+    for(var i = 0, c = e.childNodes; i < c.length; i++) {
+        zoom_parent(c[i]);
+    }
+}
+function zoom(node) {
+    var attr = find_child(node, "rect").attributes;
+    var width = parseFloat(attr.width.value);
+    var xmin = parseFloat(attr.x.value);
+    var xmax = xmin + width;
+    var ymin = parseFloat(attr.y.value);
+    var ratio = 100 / width;
+    // XXX: Workaround for JavaScript float issues (fix me)
+    var fudge = 0.001;
+    unzoombtn.classList.remove("hide");
+    var el = frames.children;
+    for (var i = 0; i < el.length; i++) {
+        var e = el[i];
+        var a = find_child(e, "rect").attributes;
+        var ex = parseFloat(a.x.value);
+        var ew = parseFloat(a.width.value);
+        // Is it an ancestor
+        if (!inverted) {
+            var upstack = parseFloat(a.y.value) > ymin;
+        } else {
+            var upstack = parseFloat(a.y.value) < ymin;
+        }
+        if (upstack) {
+            // Direct ancestor
+            if (ex <= xmin && (ex+ew+fudge) >= xmax) {
+                e.classList.add("parent");
+                zoom_parent(e);
+                update_text(e);
+            }
+            // not in current path
+            else
+                e.classList.add("hide");
+        }
+        // Children maybe
+        else {
+            // no common path
+            if (ex < xmin || ex + fudge >= xmax) {
+                e.classList.add("hide");
+            }
+            else {
+                zoom_child(e, xmin, ratio);
+                update_text(e);
+            }
+        }
+    }
+}
+function unzoom() {
+    unzoombtn.classList.add("hide");
+    var el = frames.children;
+    for(var i = 0; i < el.length; i++) {
+        el[i].classList.remove("parent");
+        el[i].classList.remove("hide");
+        zoom_reset(el[i]);
+        update_text(el[i]);
+    }
+}
+// search
+function reset_search() {
+    var el = document.querySelectorAll("#frames rect");
+    for (var i = 0; i < el.length; i++) {
+        orig_load(el[i], "fill")
+    }
+    var params = get_params();
+    delete params.s;
+    history.replaceState(null, null, parse_params(params));
+}
+function search_prompt() {
+    if (!searching) {
+        var term = prompt("Enter a search term (regexp " +
+            "allowed, eg: ^ext4_)", "");
+        if (term != null) {
+            search(term)
+        }
+    } else {
+        reset_search();
+        searching = 0;
+        searchbtn.classList.remove("show");
+        searchbtn.firstChild.nodeValue = "Search"
+        matchedtxt.classList.add("hide");
+        matchedtxt.firstChild.nodeValue = ""
+    }
+}
+function search(term) {
+    var re = new RegExp(term);
+    var el = frames.children;
+    var matches = new Object();
+    var maxwidth = 0;
+    for (var i = 0; i < el.length; i++) {
+        var e = el[i];
+        var func = g_to_func(e);
+        var rect = find_child(e, "rect");
+        if (func == null || rect == null)
+            continue;
+        // Save max width. Only works as we have a root frame
+        var w = parseFloat(rect.attributes.width.value);
+        if (w > maxwidth)
+            maxwidth = w;
+        if (func.match(re)) {
+            // highlight
+            var x = parseFloat(rect.attributes.x.value);
+            orig_save(rect, "fill");
+            rect.attributes.fill.value = searchcolor;
+            // remember matches
+            if (matches[x] == undefined) {
+                matches[x] = w;
+            } else {
+                if (w > matches[x]) {
+                    // overwrite with parent
+                    matches[x] = w;
+                }
+            }
+            searching = 1;
+        }
+    }
+    if (!searching)
+        return;
+    var params = get_params();
+    params.s = term;
+    history.replaceState(null, null, parse_params(params));
+
+    searchbtn.classList.add("show");
+    searchbtn.firstChild.nodeValue = "Reset Search";
+    // calculate percent matched, excluding vertical overlap
+    var count = 0;
+    var lastx = -1;
+    var lastw = 0;
+    var keys = Array();
+    for (k in matches) {
+        if (matches.hasOwnProperty(k))
+            keys.push(k);
+    }
+    // sort the matched frames by their x location
+    // ascending, then width descending
+    keys.sort(function(a, b){
+        return a - b;
+    });
+    // Step through frames saving only the biggest bottom-up frames
+    // thanks to the sort order. This relies on the tree property
+    // where children are always smaller than their parents.
+    var fudge = 0.0001;    // JavaScript floating point
+    for (var k in keys) {
+        var x = parseFloat(keys[k]);
+        var w = matches[keys[k]];
+        if (x >= lastx + lastw - fudge) {
+            count += w;
+            lastx = x;
+            lastw = w;
+        }
+    }
+    // display matched percent
+    matchedtxt.classList.remove("hide");
+    var pct = 100 * count / maxwidth;
+    if (pct != 100) pct = pct.toFixed(1);
+    matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+}
+function format_percent(n) {
+    return n.toFixed(4) + "%";
+}
+]]></script><rect x="0" y="0" width="100%" height="310" fill="url(#background)"/><text id="title" x="50.0000%" y="24.00">py-spy</text><text id="details" x="10" y="293.00"> </text><text id="unzoom" class="hide" x="10" y="24.00">Reset Zoom</text><text id="search" x="1090" y="24.00">Search</text><text id="matched" x="1090" y="293.00"> </text><svg id="frames" x="10" width="1180"><g><title>__Pyx_Coroutine_SendEx.isra.46 (av/enum.cpython-37m-x86_64-linux-gnu.so) (190 samples, 1.82%)</title><rect x="0.7479%" y="100" width="1.8218%" height="15" fill="rgb(227,0,7)"/><text x="0.9979%" y="110.50">_..</text></g><g><title>__pyx_gb_2av_9container_5input_14InputContainer_8generator (av/container/input.cpython-37m-x86_64-linux-gnu.so) (188 samples, 1.80%)</title><rect x="0.7671%" y="116" width="1.8027%" height="15" fill="rgb(217,0,24)"/><text x="1.0171%" y="126.50">_..</text></g><g><title>0x7fd8d24c2526 (libavcodec.so.58.54.100) (215 samples, 2.06%)</title><rect x="3.2122%" y="212" width="2.0616%" height="15" fill="rgb(221,193,54)"/><text x="3.4622%" y="222.50">0..</text></g><g><title>0x7fd8d2855dc4 (libavcodec.so.58.54.100) (109 samples, 1.05%)</title><rect x="4.2286%" y="228" width="1.0452%" height="15" fill="rgb(248,212,6)"/><text x="4.4786%" y="238.50"></text></g><g><title>__pthread_cond_wait (libpthread-2.27.so) (109 samples, 1.05%)</title><rect x="4.2286%" y="244" width="1.0452%" height="15" fill="rgb(208,68,35)"/><text x="4.4786%" y="254.50"></text></g><g><title>avcodec_receive_frame (libavcodec.so.58.54.100) (228 samples, 2.19%)</title><rect x="3.1547%" y="196" width="2.1862%" height="15" fill="rgb(232,128,0)"/><text x="3.4047%" y="206.50">a..</text></g><g><title>CodecContext__recv_frame (av/codec/context.cpython-37m-x86_64-linux-gnu.so) (245 samples, 2.35%)</title><rect x="3.0012%" y="180" width="2.3492%" height="15" fill="rgb(207,160,47)"/><text x="3.2512%" y="190.50">C..</text></g><g><title>0x7fd8d27d5172 (libavcodec.so.58.54.100) (202 samples, 1.94%)</title><rect x="6.4436%" y="244" width="1.9369%" height="15" fill="rgb(228,23,34)"/><text x="6.6936%" y="254.50">0..</text></g><g><title>0x7fd8d27cf56d (libavcodec.so.58.54.100) (120 samples, 1.15%)</title><rect x="7.2298%" y="260" width="1.1506%" height="15" fill="rgb(218,30,26)"/><text x="7.4798%" y="270.50"></text></g><g><title>0x7fd8d27a7a42 (libavcodec.so.58.54.100) (598 samples, 5.73%)</title><rect x="5.5135%" y="228" width="5.7340%" height="15" fill="rgb(220,122,19)"/><text x="5.7635%" y="238.50">0x7fd8d..</text></g><g><title>0x7fd8d28558b5 (libavcodec.so.58.54.100) (604 samples, 5.79%)</title><rect x="5.5135%" y="212" width="5.7915%" height="15" fill="rgb(250,228,42)"/><text x="5.7635%" y="222.50">0x7fd8d..</text></g><g><title>0x7fd8d2855dc4 (libavcodec.so.58.54.100) (1,286 samples, 12.33%)</title><rect x="12.0625%" y="212" width="12.3310%" height="15" fill="rgb(240,193,28)"/><text x="12.3125%" y="222.50">0x7fd8d2855dc4 (li..</text></g><g><title>__pthread_cond_wait (libpthread-2.27.so) (1,286 samples, 12.33%)</title><rect x="12.0625%" y="228" width="12.3310%" height="15" fill="rgb(216,20,37)"/><text x="12.3125%" y="238.50">__pthread_cond_wai..</text></g><g><title>0x7fd8d24c2526 (libavcodec.so.58.54.100) (1,975 samples, 18.94%)</title><rect x="5.4751%" y="196" width="18.9376%" height="15" fill="rgb(206,188,39)"/><text x="5.7251%" y="206.50">0x7fd8d24c2526 (libavcodec.so...</text></g><g><title>CodecContext__send_packet_and_recv (av/codec/context.cpython-37m-x86_64-linux-gnu.so) (2,252 samples, 21.59%)</title><rect x="2.9917%" y="164" width="21.5936%" height="15" fill="rgb(217,207,13)"/><text x="3.2417%" y="174.50">CodecContext__send_packet_and_recv..</text></g><g><title>avcodec_send_packet (libavcodec.so.58.54.100) (2,002 samples, 19.20%)</title><rect x="5.3888%" y="180" width="19.1965%" height="15" fill="rgb(231,73,38)"/><text x="5.6388%" y="190.50">avcodec_send_packet (libavcode..</text></g><g><title>__Pyx__PyObject_CallOneArg (av/packet.cpython-37m-x86_64-linux-gnu.so) (2,374 samples, 22.76%)</title><rect x="2.8958%" y="116" width="22.7634%" height="15" fill="rgb(225,20,46)"/><text x="3.1458%" y="126.50">__Pyx__PyObject_CallOneArg (av/packe..</text></g><g><title>decode (av/stream.cpython-37m-x86_64-linux-gnu.so) (2,372 samples, 22.74%)</title><rect x="2.9149%" y="132" width="22.7443%" height="15" fill="rgb(210,31,41)"/><text x="3.1649%" y="142.50">decode (av/stream.cpython-37m-x86_64..</text></g><g><title>CodecContext_decode (av/codec/context.cpython-37m-x86_64-linux-gnu.so) (2,371 samples, 22.73%)</title><rect x="2.9245%" y="148" width="22.7347%" height="15" fill="rgb(221,200,47)"/><text x="3.1745%" y="158.50">CodecContext_decode (av/codec/contex..</text></g><g><title>__Pyx_Coroutine_SendEx.isra.46 (av/enum.cpython-37m-x86_64-linux-gnu.so) (2,604 samples, 24.97%)</title><rect x="0.7287%" y="68" width="24.9688%" height="15" fill="rgb(226,26,5)"/><text x="0.9787%" y="78.50">__Pyx_Coroutine_SendEx.isra.46 (av/enum...</text></g><g><title>__pyx_gb_2av_9container_5input_14InputContainer_11generator1 (av/container/input.cpython-37m-x86_64-linux-gnu.so) (2,604 samples, 24.97%)</title><rect x="0.7287%" y="84" width="24.9688%" height="15" fill="rgb(249,33,26)"/><text x="0.9787%" y="94.50">__pyx_gb_2av_9container_5input_14InputCo..</text></g><g><title>decode (av/packet.cpython-37m-x86_64-linux-gnu.so) (2,379 samples, 22.81%)</title><rect x="2.8862%" y="100" width="22.8114%" height="15" fill="rgb(235,183,28)"/><text x="3.1362%" y="110.50">decode (av/packet.cpython-37m-x86_64..</text></g><g><title>&lt;module&gt; (PV_ratrace_pyav.py:10) (2,727 samples, 26.15%)</title><rect x="0.0479%" y="52" width="26.1482%" height="15" fill="rgb(221,5,38)"/><text x="0.2979%" y="62.50">&lt;module&gt; (PV_ratrace_pyav.py:10)</text></g><g><title>_find_and_load (&lt;frozen importlib._bootstrap&gt;:980) (137 samples, 1.31%)</title><rect x="27.2509%" y="100" width="1.3136%" height="15" fill="rgb(247,18,42)"/><text x="27.5009%" y="110.50"></text></g><g><title>_path_stat (&lt;frozen importlib._bootstrap_external&gt;:81) (110 samples, 1.05%)</title><rect x="31.4412%" y="196" width="1.0548%" height="15" fill="rgb(241,131,45)"/><text x="31.6912%" y="206.50"></text></g><g><title>os_stat (python3.7) (105 samples, 1.01%)</title><rect x="31.4891%" y="212" width="1.0068%" height="15" fill="rgb(249,31,29)"/><text x="31.7391%" y="222.50"></text></g><g><title>find_spec (&lt;frozen importlib._bootstrap_external&gt;:1364) (126 samples, 1.21%)</title><rect x="31.2973%" y="180" width="1.2082%" height="15" fill="rgb(225,111,53)"/><text x="31.5473%" y="190.50"></text></g><g><title>find_spec (&lt;frozen importlib._bootstrap_external&gt;:1391) (107 samples, 1.03%)</title><rect x="32.6685%" y="180" width="1.0260%" height="15" fill="rgb(238,160,17)"/><text x="32.9185%" y="190.50"></text></g><g><title>_get_spec (&lt;frozen importlib._bootstrap_external&gt;:1252) (325 samples, 3.12%)</title><rect x="31.1056%" y="164" width="3.1163%" height="15" fill="rgb(214,148,48)"/><text x="31.3556%" y="174.50">_ge..</text></g><g><title>find_spec (&lt;frozen importlib._bootstrap_external&gt;:1280) (385 samples, 3.69%)</title><rect x="30.8275%" y="148" width="3.6916%" height="15" fill="rgb(232,36,49)"/><text x="31.0775%" y="158.50">find..</text></g><g><title>_find_spec (&lt;frozen importlib._bootstrap&gt;:906) (452 samples, 4.33%)</title><rect x="30.2426%" y="132" width="4.3341%" height="15" fill="rgb(209,103,24)"/><text x="30.4926%" y="142.50">_find..</text></g><g><title>_find_and_load_unlocked (&lt;frozen importlib._bootstrap&gt;:963) (538 samples, 5.16%)</title><rect x="29.4563%" y="116" width="5.1587%" height="15" fill="rgb(229,88,8)"/><text x="29.7063%" y="126.50">_find_..</text></g><g><title>_find_and_load (&lt;frozen importlib._bootstrap&gt;:983) (688 samples, 6.60%)</title><rect x="28.6509%" y="100" width="6.5970%" height="15" fill="rgb(213,181,19)"/><text x="28.9009%" y="110.50">_find_and..</text></g><g><title>__Pyx_Import (av/video/frame.cpython-37m-x86_64-linux-gnu.so) (918 samples, 8.80%)</title><rect x="26.7523%" y="84" width="8.8024%" height="15" fill="rgb(254,191,54)"/><text x="27.0023%" y="94.50">__Pyx_Import..</text></g><g><title>_get_spec (&lt;frozen importlib._bootstrap_external&gt;:1252) (248 samples, 2.38%)</title><rect x="39.3998%" y="180" width="2.3780%" height="15" fill="rgb(241,83,37)"/><text x="39.6498%" y="190.50">_g..</text></g><g><title>find_spec (&lt;frozen importlib._bootstrap_external&gt;:1280) (290 samples, 2.78%)</title><rect x="39.1696%" y="164" width="2.7807%" height="15" fill="rgb(233,36,39)"/><text x="39.4196%" y="174.50">fi..</text></g><g><title>_find_spec (&lt;frozen importlib._bootstrap&gt;:906) (337 samples, 3.23%)</title><rect x="38.7381%" y="148" width="3.2314%" height="15" fill="rgb(226,3,54)"/><text x="38.9881%" y="158.50">_fi..</text></g><g><title>_find_and_load_unlocked (&lt;frozen importlib._bootstrap&gt;:963) (414 samples, 3.97%)</title><rect x="38.0094%" y="132" width="3.9697%" height="15" fill="rgb(245,192,40)"/><text x="38.2594%" y="142.50">_fin..</text></g><g><title>_find_and_load (&lt;frozen importlib._bootstrap&gt;:983) (500 samples, 4.79%)</title><rect x="37.5300%" y="116" width="4.7943%" height="15" fill="rgb(238,167,29)"/><text x="37.7800%" y="126.50">_find_..</text></g><g><title>__Pyx_Import (av/video/frame.cpython-37m-x86_64-linux-gnu.so) (645 samples, 6.18%)</title><rect x="36.2259%" y="100" width="6.1847%" height="15" fill="rgb(232,182,51)"/><text x="36.4759%" y="110.50">__Pyx_Im..</text></g><g><title>frame_useful_array (av/video/frame.cpython-37m-x86_64-linux-gnu.so) (696 samples, 6.67%)</title><rect x="36.1684%" y="84" width="6.6737%" height="15" fill="rgb(231,60,39)"/><text x="36.4184%" y="94.50">frame_use..</text></g><g><title>to_ndarray (av/video/frame.cpython-37m-x86_64-linux-gnu.so) (1,777 samples, 17.04%)</title><rect x="26.4167%" y="68" width="17.0390%" height="15" fill="rgb(208,69,12)"/><text x="26.6667%" y="78.50">to_ndarray (av/video/frame..</text></g><g><title>VideoFrame__init (av/video/frame.cpython-37m-x86_64-linux-gnu.so) (107 samples, 1.03%)</title><rect x="44.4146%" y="148" width="1.0260%" height="15" fill="rgb(235,93,37)"/><text x="44.6646%" y="158.50"></text></g><g><title>0x7fd8d45ff4eb (libc-2.27.so) (171 samples, 1.64%)</title><rect x="46.3036%" y="228" width="1.6397%" height="15" fill="rgb(213,116,39)"/><text x="46.5536%" y="238.50"></text></g><g><title>av_mallocz (libavutil.so.56.31.100) (223 samples, 2.14%)</title><rect x="45.8433%" y="180" width="2.1383%" height="15" fill="rgb(222,207,29)"/><text x="46.0933%" y="190.50">a..</text></g><g><title>av_malloc (libavutil.so.56.31.100) (177 samples, 1.70%)</title><rect x="46.2844%" y="196" width="1.6972%" height="15" fill="rgb(206,96,30)"/><text x="46.5344%" y="206.50"></text></g><g><title>posix_memalign (libc-2.27.so) (177 samples, 1.70%)</title><rect x="46.2844%" y="212" width="1.6972%" height="15" fill="rgb(218,138,4)"/><text x="46.5344%" y="222.50"></text></g><g><title>sws_alloc_context (libswscale.so.5.5.100) (235 samples, 2.25%)</title><rect x="45.8433%" y="164" width="2.2533%" height="15" fill="rgb(250,191,14)"/><text x="46.0933%" y="174.50">s..</text></g><g><title>0x7fd8d20e855c (libswscale.so.5.5.100) (453 samples, 4.34%)</title><rect x="56.0456%" y="180" width="4.3437%" height="15" fill="rgb(239,60,40)"/><text x="56.2956%" y="190.50">0x7fd..</text></g><g><title>sws_getCachedContext (libswscale.so.5.5.100) (1,889 samples, 18.11%)</title><rect x="45.5557%" y="148" width="18.1130%" height="15" fill="rgb(206,27,48)"/><text x="45.8057%" y="158.50">sws_getCachedContext (libsws..</text></g><g><title>sws_init_context (libswscale.so.5.5.100) (1,624 samples, 15.57%)</title><rect x="48.0967%" y="164" width="15.5720%" height="15" fill="rgb(225,35,8)"/><text x="48.3467%" y="174.50">sws_init_context (libsws..</text></g><g><title>sws_setColorspaceDetails (libswscale.so.5.5.100) (183 samples, 1.75%)</title><rect x="61.9139%" y="180" width="1.7547%" height="15" fill="rgb(250,213,24)"/><text x="62.1639%" y="190.50"></text></g><g><title>0x7fd8d214f06f (libswscale.so.5.5.100) (149 samples, 1.43%)</title><rect x="69.4218%" y="164" width="1.4287%" height="15" fill="rgb(247,123,22)"/><text x="69.6718%" y="174.50"></text></g><g><title>0x7fd8d214f074 (libswscale.so.5.5.100) (130 samples, 1.25%)</title><rect x="70.8505%" y="164" width="1.2465%" height="15" fill="rgb(231,138,38)"/><text x="71.1005%" y="174.50"></text></g><g><title>0x7fd8d214f11a (libswscale.so.5.5.100) (147 samples, 1.41%)</title><rect x="92.8660%" y="164" width="1.4095%" height="15" fill="rgb(231,145,46)"/><text x="93.1160%" y="174.50"></text></g><g><title>VideoReformatter__reformat (av/video/reformatter.cpython-37m-x86_64-linux-gnu.so) (5,383 samples, 51.62%)</title><rect x="43.9927%" y="132" width="51.6157%" height="15" fill="rgb(251,118,11)"/><text x="44.2427%" y="142.50">VideoReformatter__reformat (av/video/reformatter.cpython-37m-x86_64-linux-gnu.so)</text></g><g><title>sws_scale (libswscale.so.5.5.100) (3,331 samples, 31.94%)</title><rect x="63.6686%" y="148" width="31.9398%" height="15" fill="rgb(217,147,25)"/><text x="63.9186%" y="158.50">sws_scale (libswscale.so.5.5.100)</text></g><g><title>&lt;module&gt; (PV_ratrace_pyav.py:11) (7,294 samples, 69.94%)</title><rect x="26.1962%" y="52" width="69.9396%" height="15" fill="rgb(247,81,37)"/><text x="26.4462%" y="62.50">&lt;module&gt; (PV_ratrace_pyav.py:11)</text></g><g><title>to_rgb (av/video/frame.cpython-37m-x86_64-linux-gnu.so) (5,494 samples, 52.68%)</title><rect x="43.4557%" y="68" width="52.6800%" height="15" fill="rgb(209,12,38)"/><text x="43.7057%" y="78.50">to_rgb (av/video/frame.cpython-37m-x86_64-linux-gnu.so)</text></g><g><title>reformat (av/video/frame.cpython-37m-x86_64-linux-gnu.so) (5,483 samples, 52.57%)</title><rect x="43.5612%" y="84" width="52.5746%" height="15" fill="rgb(227,1,9)"/><text x="43.8112%" y="94.50">reformat (av/video/frame.cpython-37m-x86_64-linux-gnu.so)</text></g><g><title>reformat (av/video/reformatter.cpython-37m-x86_64-linux-gnu.so) (5,468 samples, 52.43%)</title><rect x="43.7051%" y="100" width="52.4307%" height="15" fill="rgb(248,47,43)"/><text x="43.9551%" y="110.50">reformat (av/video/reformatter.cpython-37m-x86_64-linux-gnu.so)</text></g><g><title>reformat (av/video/reformatter.cpython-37m-x86_64-linux-gnu.so) (5,463 samples, 52.38%)</title><rect x="43.7530%" y="116" width="52.3828%" height="15" fill="rgb(221,10,30)"/><text x="44.0030%" y="126.50">reformat (av/video/reformatter.cpython-37m-x86_64-linux-gnu.so)</text></g><g><title>__pyx_tp_new_2av_9container_4core_Container (av/container/core.cpython-37m-x86_64-linux-gnu.so) (124 samples, 1.19%)</title><rect x="96.7686%" y="100" width="1.1890%" height="15" fill="rgb(210,229,1)"/><text x="97.0186%" y="110.50"></text></g><g><title>avformat_open_input (libavformat.so.58.29.100) (114 samples, 1.09%)</title><rect x="96.8645%" y="116" width="1.0931%" height="15" fill="rgb(222,148,37)"/><text x="97.1145%" y="126.50"></text></g><g><title>avformat_find_stream_info (libavformat.so.58.29.100) (116 samples, 1.11%)</title><rect x="97.9576%" y="100" width="1.1123%" height="15" fill="rgb(234,67,33)"/><text x="98.2076%" y="110.50"></text></g><g><title>&lt;module&gt; (PV_ratrace_pyav.py:8) (283 samples, 2.71%)</title><rect x="96.7399%" y="52" width="2.7136%" height="15" fill="rgb(247,98,35)"/><text x="96.9899%" y="62.50">&lt;m..</text></g><g><title>open (av/container/core.cpython-37m-x86_64-linux-gnu.so) (282 samples, 2.70%)</title><rect x="96.7494%" y="68" width="2.7040%" height="15" fill="rgb(247,138,52)"/><text x="96.9994%" y="78.50">op..</text></g><g><title>__pyx_tp_new_2av_9container_5input_InputContainer (av/container/input.cpython-37m-x86_64-linux-gnu.so) (281 samples, 2.69%)</title><rect x="96.7590%" y="84" width="2.6944%" height="15" fill="rgb(213,79,30)"/><text x="97.0090%" y="94.50">__..</text></g><g><title>all (10,429 samples, 100%)</title><rect x="0.0000%" y="36" width="100.0000%" height="15" fill="rgb(246,177,23)"/><text x="0.2500%" y="46.50"></text></g></svg></svg>
