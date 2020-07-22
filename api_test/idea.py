@@ -20,17 +20,8 @@ class Video(object):
         self.len = self.__len__()
         self.duration = # would be usefull to have? 
         self.avg_fps
-# this is expensive to get  
-#     def __len__(self):
-#         return get_num_frames(self.container)
-# decord shows this is not a good idea
-#     def __getitem__(self, start_time):
-#         self.seek(start_time)
-#         return self.next()
 
-    def get_clip(self, start_time, end_time=-1):
-        "maybe optimized version of the function above?"
-        # push for later
+
     
     def _get_current_timestamp(self):
         self.container.ts
@@ -40,19 +31,23 @@ class Video(object):
         to seek into the closest keyframe, or?
         """
         self.container.seek(ts)
-       
-    def fast_seek(self, ts):
-        """
-        seek to the neighrest keyframe
-        """
         
     def next(self):
-        return self.container.next_frame()
+        return self.container.next_frame(), self._get_current_timestamp
 
+    def get_clip(self, start_time, end_time=-1):
+        "maybe optimized version of the function above?"
+        # push for 
+        
 # this is needed for "fast approximate seek"
     def _read_keyframes(self):
         """list all keyframes (without decoding full video,
         this would be needed to support fast reading for what tullie wanted
+        """
+    
+    def get_all_pts(self):
+        """ list pts for every potential frame
+        probably can get even sparser than this and maybe multithreaded?
         """
 
 
