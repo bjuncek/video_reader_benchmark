@@ -5,14 +5,14 @@ import timeit
 import numpy as np
 import pandas as pd
 import torchvision
-from decord import VideoReader
+from decord import VideoReader, VideoLoader
 from decord import cpu, gpu
 
 NUBMER_TRIALS=10
 
 
 setup_decord = """\
-from decord import VideoReader
+from decord import VideoReader, VideoLoader
 from decord import cpu, gpu
 """
 
@@ -25,11 +25,21 @@ def get_decord(path):
         images_d.append(vr[i])
     print("decord", len(images_d))
 
+
 def get_decord_batch(path):
     vr = VideoReader(path, ctx=cpu(0))
     len_vr = len(vr)
     batch = vr.get_batch(range(len_vr))
     print("decord", batch.shape)   
+
+    
+def get_decord_loader(path):
+    images = []
+    vr = VideoLoader([path], shape=(20, 256, 340, 3), ctx=cpu(0), interval=0, skip=0, shuffle=1)
+    for i in range(len(vr)):
+        frames, _ = vr.next()
+        images.append(frames)
+    print("decord VL", len(images))
 
 
 
@@ -54,12 +64,17 @@ for i in range(10):
 
         times.append( timeit.timeit(f"get_decord(\"{path}\")", setup=setup_decord, globals=globals(), number=NUBMER_TRIALS)/NUBMER_TRIALS)
         video.append(file)
-        loaders.append("decord_forlooop")
+        loaders.append("decord_VR_forlooop")
         num_frames.append(nframes)
 
         times.append( timeit.timeit(f"get_decord_batch(\"{path}\")", setup=setup_decord, globals=globals(), number=NUBMER_TRIALS)/NUBMER_TRIALS)
         video.append(file)
-        loaders.append("decord_batch")
+        loaders.append("decord_VR_batch")
+        num_frames.append(nframes)
+        
+        times.append( timeit.timeit(f"get_decord_loader(\"{path}\")", setup=setup_decord, globals=globals(), number=NUBMER_TRIALS)/NUBMER_TRIALS)
+        video.append(file)
+        loaders.append("decord_VL")
         num_frames.append(nframes)
 
 df = pd.DataFrame({"loader": loaders, "video": video, "time":times, "num_frames":num_frames})
