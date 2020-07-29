@@ -7,22 +7,33 @@ class Video(object):
     def __init__(self, path_to_video, stream="video", debug=True):
 
         self.container = av.open(path_to_video, metadata_errors="ignore")
+        self.fps = float(self.container.streams.video[0].framerate)
         self.debug = debug
 
         # any additional preprocessing we want to do
         self._init_stream_list()
+        self._get_duration()
         self._set_current_stream(stream)
         self._read_keyframes()
 
-        
         if self.debug:
             print(path_to_video, "\n \t default stream: ", self.current_stream)
+    
+    def _get_duration(self):
+        duration = []
+        for d in self.available_streams:
+            duration.append(float(d['stream'].duration * d['stream'].time_base))
+        self.duration = min(duration)
     
     def _init_stream_list(self):
         self.available_streams = [{"type": stream.type, "stream": stream} for stream in list(self.container.streams)]
         if self.debug:
             _ = self.list_streams()
-
+    
+    @property
+    def length(self):
+        return self.duration
+            
     def list_streams(self):
         if self.debug:
             print("List of available streams: (id, stream_type, stream)")
@@ -63,6 +74,9 @@ class Video(object):
         """
         if stream is not None:
             self._set_current_stream(stream)
+        if ts > self.duration:
+            warnings.warn(f"Seeking to {ts}, video duration is {self.duration} - failing silently and seeking to 0")
+            ts = 0
         start_offset = Video._sec_to_stream(ts, self.current_stream)
         self.container.seek(start_offset, backward=backward, any_frame=any_frame, stream=self.current_stream)
 
@@ -72,11 +86,23 @@ class Video(object):
         """
         if stream is not None:
             self._set_current_stream(stream)
-        frame = self.container.decode(self.current_stream).__next__()
-        ts = Video._stream_to_sec(frame.pts, self.current_stream)
-        if self.current_stream.type == "video":
-            frame = frame.to_rgb()
-        image = frame.to_ndarray()
+        
+        ts = float("inf")
+        image = []
+        
+        try:
+            frame = next(self.container.decode(self.current_stream))
+            ts = Video._stream_to_sec(frame.pts, self.current_stream)
+            if self.current_stream.type == "video":
+                frame = frame.to_rgb()
+            image = frame.to_ndarray()
+        except StopIteration:
+            warnings.warn("Stopping")
+            pass
+        except av.AVError:
+            warnings.warn("Couldn't read stuff")
+            pass
+        
         
         return image, ts, self.current_stream.type
 
