@@ -4,11 +4,10 @@ import warnings
 import torchvision.transforms as t
 
 class Video(object):
-    def __init__(self, path_to_video, stream="video", keyframes_only=False, debug=True):
+    def __init__(self, path_to_video, stream="video", debug=True):
 
         self.container = av.open(path_to_video, metadata_errors="ignore")
         self.debug = debug
-        self.keyframes_only = keyframes_only
 
         # any additional preprocessing we want to do
         self._init_stream_list()
@@ -17,7 +16,7 @@ class Video(object):
 
         
         if self.debug:
-            print(path_to_video, "\n \t default stream: ", self.current_stream, "\n \t keyframes only: ", self.keyframes_only)
+            print(path_to_video, "\n \t default stream: ", self.current_stream)
     
     def _init_stream_list(self):
         self.available_streams = [{"type": stream.type, "stream": stream} for stream in list(self.container.streams)]
@@ -46,11 +45,7 @@ class Video(object):
             warnings.warn("Stream passed directly - if it doesn't exist it will fail ungracefully")
             self.current_stream = stream
         else:
-            warnings.warn("Stream undefined, will fail gracfully")
-            exit()
-        
-        if self.keyframes_only:
-            self.current_stream.codec_context.skip_frame = 'NONKEY'
+            raise Exception("No streams defined")
     
     def _read_keyframes(self):
         """list all keyframes (without decoding full video,
