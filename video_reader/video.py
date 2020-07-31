@@ -7,33 +7,27 @@ class Video(object):
     def __init__(self, path_to_video, stream="video", debug=True):
 
         self.container = av.open(path_to_video, metadata_errors="ignore")
-        self.fps = float(self.container.streams.video[0].framerate)
         self.debug = debug
 
         # any additional preprocessing we want to do
         self._init_stream_list()
-        self._get_duration()
+        self._get_metadata()
         self._set_current_stream(stream)
-        self._read_keyframes()
 
         if self.debug:
             print(path_to_video, "\n \t default stream: ", self.current_stream)
     
-    def _get_duration(self):
-        duration = []
-        for d in self.available_streams:
-            duration.append(float(d['stream'].duration * d['stream'].time_base))
-        self.duration = min(duration)
+    def _get_metadata(self):
+        metadata = {}
+        for stream in self.available_streams:
+            metadata[stream['stream']] = {"fps": float(stream['stream'].rate), "duration": stream['stream'].duration * stream['stream'].time_base}
+        self.metadata = metadata
     
     def _init_stream_list(self):
         self.available_streams = [{"type": stream.type, "stream": stream} for stream in list(self.container.streams)]
         if self.debug:
             _ = self.list_streams()
-    
-    @property
-    def length(self):
-        return self.duration
-            
+        
     def list_streams(self):
         if self.debug:
             print("List of available streams: (id, stream_type, stream)")
@@ -42,7 +36,7 @@ class Video(object):
         return self.available_streams
         
     def _set_current_stream(self, stream):  
-        
+  
         if isinstance(stream, str):
             warnings.warn("Stream given as a descriptive string, will return the first stream of that type if it exists")
             avail_streams = [x.type for x in list(self.container.streams)]
@@ -57,16 +51,6 @@ class Video(object):
             self.current_stream = stream
         else:
             raise Exception("No streams defined")
-    
-    def _read_keyframes(self):
-        """list all keyframes (without decoding full video,
-        this would be needed to support fast reading for what tullie wanted
-        """
-        self.keyframes = []
-        #TODO: this kinda works
-        for packet in self.container.demux():
-            if packet.is_keyframe:
-                self.keyframes.append(Video._stream_to_sec(packet.pts, self.current_stream))
         
     def seek(self, ts, stream=None, backward=True, any_frame=False):
         """ 
@@ -74,8 +58,8 @@ class Video(object):
         """
         if stream is not None:
             self._set_current_stream(stream)
-        if ts > self.duration:
-            warnings.warn(f"Seeking to {ts}, video duration is {self.duration} - failing silently and seeking to 0")
+        if ts > self.metadata[self.current_stream]['duration']:
+            warnings.warn(f"Seeking to {ts}, video duration is {self.metadata[self.current_stream]['duration']} - failing silently and seeking to 0")
             ts = 0
         start_offset = Video._sec_to_stream(ts, self.current_stream)
         self.container.seek(start_offset, backward=backward, any_frame=any_frame, stream=self.current_stream)
