@@ -22,7 +22,11 @@ class Video(object):
         metadata = {}
         for key in self.available_streams.keys():
             for stream in self.available_streams[key]:
-                metadata[stream] = {"fps": stream.rate, "duration": stream.duration * stream.time_base}
+                metadata[stream] = {"fps": stream.rate}
+                if stream.duration:
+                    metadata[stream]["duration"] = stream.duration * stream.time_base
+                else:
+                    metadata[stream]["duration"] = -1
         self.metadata = metadata
     
     def _init_stream_dict(self):
@@ -65,7 +69,7 @@ class Video(object):
         # TODO: docs
         if stream is not None:
             self._set_current_stream(stream)
-        if ts > self.metadata[self.current_stream]['duration']:
+        if self.metadata[self.current_stream]['duration'] > 0 and ts > self.metadata[self.current_stream]['duration']:
             warnings.warn(f"Seeking to {ts}, video duration is {self.metadata[self.current_stream]['duration']} - will seek to the last available keyframe")
             self.container.seek(start_offset, backward=backward, any_frame=False, stream=self.current_stream)
             return
