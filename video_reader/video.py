@@ -10,7 +10,7 @@ class Video(object):
         self.debug = debug
 
         # any additional preprocessing we want to do
-        self._init_stream_list()
+        self._init_stream_dict()
         self._get_metadata()
         self._set_current_stream(stream)
 
@@ -18,56 +18,83 @@ class Video(object):
             print(path_to_video, "\n \t default stream: ", self.current_stream)
     
     def _get_metadata(self):
+        # TODO: docs
         metadata = {}
-        for stream in self.available_streams:
-            metadata[stream['stream']] = {"fps": float(stream['stream'].rate), "duration": stream['stream'].duration * stream['stream'].time_base}
+        for key in self.available_streams.keys():
+            for stream in self.available_streams[key]:
+                metadata[stream] = {"fps": stream.rate, "duration": stream.duration * stream.time_base}
         self.metadata = metadata
     
-    def _init_stream_list(self):
-        self.available_streams = [{"type": stream.type, "stream": stream} for stream in list(self.container.streams)]
+    def _init_stream_dict(self):
+        # TODO: DOCS
+        self.available_streams = {}
+        for stream in list(self.container.streams):
+            if stream.type not in self.available_streams:
+                self.available_streams[stream.type] = [stream]
+            else:
+                self.available_streams[stream.type].append(stream)
         if self.debug:
             _ = self.list_streams()
         
     def list_streams(self):
+        # TODO: docs
         if self.debug:
-            print("List of available streams: (id, stream_type, stream)")
-            for i in range(len(self.available_streams)):
-                print(f"\t {i}, {self.available_streams[i]['type']}, {self.available_streams[i]['stream']} ")
+            # TODO: modify repr
+            print("List of available streams:")
+            print(self.available_streams)
         return self.available_streams
         
-    def _set_current_stream(self, stream):  
-  
-        if isinstance(stream, str):
-            warnings.warn("Stream given as a descriptive string, will return the first stream of that type if it exists")
-            avail_streams = [x.type for x in list(self.container.streams)]
-            assert stream in avail_streams, "Stream not exists"
-            stream_idx = avail_streams.index(stream)
-            self.current_stream = list(self.container.streams)[stream_idx]
-        elif isinstance(stream, int):
-            assert stream >= 0 and stream < len(list(self.container.streams)), "Stream index out of bounds"
-            self.current_stream = list(self.container.streams)[stream]
-        elif isinstance(stream, av.stream.Stream):
-            warnings.warn("Stream passed directly - if it doesn't exist it will fail ungracefully")
-            self.current_stream = stream
-        else:
-            raise Exception("No streams defined")
+    def _set_current_stream(self, stream):
+        #TODO: docs
+        avail_stream_types = [x.type for x in list(self.container.streams)]
+        st_type, st_idx = stream, 0
+        if stream.rfind(":") > 0:
+            i = stream.rfind(":")
+            st_type, st_idx = stream[:i], int(stream[i+1:])
+        if st_idx < 0:
+            # TODO: verify if thisi is a correct assumption
+            warnings.warn("Negative stream index defaults to 0")
+            st_idx = 0
+        
+        assert st_type in avail_stream_types, f"Stream type not exists {st_type} / {avail_stream_types}"
+        assert st_idx < len(self.available_streams[st_type]), f"Stream idx out of bounds {st_idx} / {len(self.available_streams[st_type])}"
+        # sett the correct stream from the dict
+        self.current_stream = self.available_streams[st_type][st_idx]
         
     def seek(self, ts, stream=None, backward=True, any_frame=False):
-        """ 
-        any_Frame allows for a more precise seek
-        """
+        # TODO: docs
         if stream is not None:
             self._set_current_stream(stream)
         if ts > self.metadata[self.current_stream]['duration']:
-            warnings.warn(f"Seeking to {ts}, video duration is {self.metadata[self.current_stream]['duration']} - failing silently and seeking to 0")
-            ts = 0
+            warnings.warn(f"Seeking to {ts}, video duration is {self.metadata[self.current_stream]['duration']} - will seek to the last available keyframe")
+            self.container.seek(start_offset, backward=backward, any_frame=False, stream=self.current_stream)
+            return
+        
         start_offset = Video._sec_to_stream(ts, self.current_stream)
-        self.container.seek(start_offset, backward=backward, any_frame=any_frame, stream=self.current_stream)
+        self.container.seek(start_offset, backward=backward, any_frame=False, stream=self.current_stream)
+        
+        if any_frame:
+            # we get the timestamp of the current frame which is
+            # the first keyframe before the index we asked for
+            _, curr_ts, _ = self.next()
+            # NOTE: this is an estimate - we're assuming that the next frame will be located
+            #       at 1/fps s away from the current frame. We then decode packets until the
+            #       just before the place we want to seek. Ideally, we'd want the following
+            #       `next()` to return the closest frame to the one we've been looking for
+            per_frame_time = float(1/self.metadata[self.current_stream]['fps'])
+            next_hat = curr_ts + per_frame_time
+            while next_hat < ts:
+                prev_ts = curr_ts
+                _, curr_ts, _ = self.next()
+                next_hat = curr_ts + per_frame_time
+                if self.debug:
+                    print("Empirical_next_delta:", curr_ts - prev_ts, 
+                          "\n Estimated_next_delta:", next_hat-curr_ts,
+                          "\n Estimated_next", next_hat, "\n Current_ts", curr_ts,
+                          "\n Requested_ts", ts, "\n")
 
     def next(self, stream=None):
-        """
-        return a tuple of streams for as many streams as we want
-        """
+        #TODO: docs
         if stream is not None:
             self._set_current_stream(stream)
         
@@ -86,7 +113,6 @@ class Video(object):
         except av.AVError:
             warnings.warn("Couldn't read stuff")
             pass
-        
         
         return image, ts, self.current_stream.type
 
