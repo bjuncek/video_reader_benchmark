@@ -9,6 +9,6 @@ for i in range(1000):
     container = av.open(path)
     container.streams.video[0].thread_type = 'AUTO'
     for frame in container.decode(video=0):
-        images_av.append(frame.to_rgb().to_ndarray())
+        images_av.append(frame)
 
 print(len(images_av))

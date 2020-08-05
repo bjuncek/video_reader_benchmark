@@ -10,7 +10,6 @@ for i in range(1000):
     while(cap.isOpened()):
         ret, frame = cap.read()
         if ret is True:
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             images_cv2.append(frame)
         else:
             break
