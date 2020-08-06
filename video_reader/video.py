@@ -64,6 +64,19 @@ class Video(object):
         assert st_idx < len(self.available_streams[st_type]), f"Stream idx out of bounds {st_idx} / {len(self.available_streams[st_type])}"
         # sett the correct stream from the dict
         self.current_stream = self.available_streams[st_type][st_idx]
+    
+    def peak(self, ts, stream=None, backward=True, any_frame=False):
+        if any_frame:
+            print("This is going to be very slow")
+        if stream is not None:
+            self._set_current_stream(stream)
+        
+        self.seek(ts, stream, backward, any_frame)
+        packet = next(self.container.demux(self.current_stream))
+        current_pts = packet.pts
+        is_kf = packet.is_keyframe
+        self.seek(ts, stream, backward, any_frame)
+        return (current_pts, Video._stream_to_sec(current_pts), is_kf)
         
     def seek(self, ts, stream=None, backward=True, any_frame=False):
         # TODO: docs
