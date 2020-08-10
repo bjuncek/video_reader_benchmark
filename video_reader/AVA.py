@@ -1,6 +1,8 @@
 import os
 import random
+from glob import glob
 
+import pandas as pd
 import torch
 from torchvision.datasets.folder import make_dataset
 from torchvision import transforms as t
@@ -54,7 +56,7 @@ class AVADataset(torch.utils.data.IterableDataset):
                     'path': path,
                     'video': video,
                     # These are a pain bc the size is not constant,
-                    # we should 
+                    # How to handle this?
 #                     'x1': self.df.x1.loc[idx],
 #                     'y1': self.df.y1.loc[idx],
 #                     'x2': self.df.x2.loc[idx],

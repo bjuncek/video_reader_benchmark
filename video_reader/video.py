@@ -23,8 +23,9 @@ class Video(object):
         for key in self.available_streams.keys():
             for stream in self.available_streams[key]:
                 metadata[stream] = {"fps": stream.rate}
-                if stream.duration:
-                    metadata[stream]["duration"] = stream.duration * stream.time_base
+                if stream.duration or self.container.duration:
+                    duration = self.container.duration if not stream.duration else stream.duration
+                    metadata[stream]["duration"] = duration * stream.time_base
                 else:
                     metadata[stream]["duration"] = -1
         self.metadata = metadata
@@ -67,7 +68,7 @@ class Video(object):
     
     def peak(self, ts, stream=None, backward=True, any_frame=False):
         if any_frame:
-            print("This is going to be very slow")
+            print("This could be slow")
         if stream is not None:
             self._set_current_stream(stream)
         
