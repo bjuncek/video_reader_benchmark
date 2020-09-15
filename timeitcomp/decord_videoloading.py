@@ -5,8 +5,8 @@ import timeit
 import numpy as np
 import pandas as pd
 import torchvision
-from decord import VideoReader, VideoLoader
-from decord import cpu, gpu
+from decord import VideoReader
+from decord import cpu
 
 NUBMER_TRIALS=10
 
