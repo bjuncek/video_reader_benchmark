@@ -22,6 +22,9 @@ torchvision.set_video_backend("video_reader")
 def get_tvvr(path):
     vframes, _, _ = torchvision.io.read_video(path, pts_unit="sec")
 
+def get_tvvr_pts(path):
+    vframes, _ = torchvision.io.read_video_timestamps(path, pts_unit="sec")
+
 
 loaders = []
 times = []
@@ -33,7 +36,7 @@ lib_version = []
 
 for i in range(args.n):
     for file in os.listdir("../videos"):
-        if file in ["README", ".ipynb_checkpoints"]:
+        if file in ["README", ".ipynb_checkpoints", "WUzgd7C1pWA.mp4", "SOX5yA1l24A.mp4", "R6llTwEh07w.mp4"]:
             print("Skipping README")
             continue
 
@@ -46,7 +49,13 @@ for i in range(args.n):
 
         times.append( timeit.timeit(f"get_tvvr(\"{path}\")", setup=setup_tvvr, globals=globals(), number=args.n)/args.n)
         video.append(file)
-        loaders.append("tv_videoreader")
+        loaders.append("tv_videoreader_frames")
+        num_frames.append(nframes)
+        lib_version.append(torchvision.__version__)
+
+        times.append( timeit.timeit(f"get_tvvr_pts(\"{path}\")", setup=setup_tvvr, globals=globals(), number=args.n)/args.n)
+        video.append(file)
+        loaders.append("tv_videoreader_pts")
         num_frames.append(nframes)
         lib_version.append(torchvision.__version__)
         
