@@ -66,35 +66,39 @@ class Video(object):
         # sett the correct stream from the dict
         self.current_stream = self.available_streams[st_type][st_idx]
     
-    def peak(self, ts, stream=None, backward=True, any_frame=False):
-        if any_frame:
-            print("This could be slow")
-        if stream is not None:
-            self._set_current_stream(stream)
-        
-        self.seek(ts, stream, backward, any_frame)
+    def peak(self, stream=None):
         packet = next(self.container.demux(self.current_stream))
         current_pts = packet.pts
         is_kf = packet.is_keyframe
-        self.seek(ts, stream, backward, any_frame)
-        return (current_pts, Video._stream_to_sec(current_pts), is_kf)
+        return (Video._stream_to_sec(current_pts, self.current_stream), is_kf)
+    
+    # def peak(self, ts, stream=None, backward=True, any_frame=False):
+        # if any_frame:
+        #     print("This could be slow")
+        
+        # self.seek(ts, stream, backward, any_frame)
+        # packet = next(self.container.demux(self.current_stream))
+        # current_pts = packet.pts
+        # is_kf = packet.is_keyframe
+        # self.seek(ts, stream, backward, any_frame)
+        # return (Video._stream_to_sec(current_pts, self.current_stream), is_kf)
         
     def seek(self, ts, stream=None, backward=True, any_frame=False):
-        # TODO: docs
         if stream is not None:
             self._set_current_stream(stream)
+
+        start_offset = Video._sec_to_stream(ts, self.current_stream)
         if self.metadata[self.current_stream]['duration'] > 0 and ts > self.metadata[self.current_stream]['duration']:
             warnings.warn(f"Seeking to {ts}, video duration is {self.metadata[self.current_stream]['duration']} - will seek to the last available keyframe")
             self.container.seek(start_offset, backward=backward, any_frame=False, stream=self.current_stream)
             return
         
-        start_offset = Video._sec_to_stream(ts, self.current_stream)
         self.container.seek(start_offset, backward=backward, any_frame=False, stream=self.current_stream)
         
         if any_frame:
             # we get the timestamp of the current frame which is
             # the first keyframe before the index we asked for
-            _, curr_ts, _ = self.next()
+            _, curr_ts = self.next()
             # NOTE: this is an estimate - we're assuming that the next frame will be located
             #       at 1/fps s away from the current frame. We then decode packets until the
             #       just before the place we want to seek. Ideally, we'd want the following
@@ -103,7 +107,7 @@ class Video(object):
             next_hat = curr_ts + per_frame_time
             while next_hat < ts:
                 prev_ts = curr_ts
-                _, curr_ts, _ = self.next()
+                _, curr_ts = self.next()
                 next_hat = curr_ts + per_frame_time
                 if self.debug:
                     print("Empirical_next_delta:", curr_ts - prev_ts, 
@@ -132,7 +136,7 @@ class Video(object):
             warnings.warn("Couldn't read stuff")
             pass
         
-        return image, ts, self.current_stream.type
+        return image, ts
 
     @staticmethod
     def _sec_to_stream(ts, stream):

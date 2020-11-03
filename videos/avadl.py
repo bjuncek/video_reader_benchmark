@@ -32,6 +32,9 @@ for split in ["train", "val", "test"]:
         if file.split(".")[0] in df.video_id.unique():
             out_path= os.path.join(data_dl, file)
             if not os.path.exists(out_path):
-                wget.download(url=url_template.format(file=file), out=out_path, bar=wget.bar_thermometer)
+                try:
+                    wget.download(url=url_template.format(file=file), out=out_path, bar=wget.bar_thermometer)
+                except:
+                    continue
         else:
             continue

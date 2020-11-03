@@ -47,7 +47,7 @@ class KineticsRandomDataset(torch.utils.data.IterableDataset):
             start = random.uniform(0., max_seek)
             vid.seek(start, stream="video", any_frame=self.from_keyframes)
             while len(video_frames) < self.clip_len:
-                frame, current_pts, stream_t = vid.next("video")
+                frame, current_pts = vid.next("video")
                 video_frames.append(self.frame_transform(frame))
             # stack it into a tensor
             video = torch.stack(video_frames, 0)
@@ -72,7 +72,7 @@ class KineticsSequentialDataset(torch.utils.data.IterableDataset):
         # allow for temporal jittering
         if epoch_size is None:
             epoch_size = len(self.samples)
-        self.epoch_size = epoch_size
+        self.num_steps = epoch_size // len(self.samples)
         
         self.clip_len = clip_len  # length of a clip in frames
         self.frame_transform = frame_transform  # transform for every frame individually
@@ -88,14 +88,14 @@ class KineticsSequentialDataset(torch.utils.data.IterableDataset):
             vid = Video(path, debug=False)
             video_frames = [] # video frame buffer 
             # seek and return frames
-            num_steps = self.epoch_size // len(self.samples)
+            
             max_seek = vid.metadata[vid.current_stream]['duration'] - (self.clip_len / vid.metadata[vid.current_stream]['fps'] + self.alpha)
-            step = max(max_seek // num_steps, 1)
-            tss = [i.item() for i in list(torch.linspace(0, max_seek, steps=bs_multiplier))]
+            step = max(max_seek // self.num_steps, 1)
+            tss = [i.item() for i in list(torch.linspace(0, max_seek, steps=self.num_steps))]
             for start in tss:
-                vid.seek(start, stream="video", any_frame=self.from_keyframes)
+                vid.seek(start, stream="video", any_frame=True)
                 while len(video_frames) < self.clip_len:
-                    frame, current_pts, stream_t = vid.next("video")
+                    frame, current_pts = vid.next("video")
                     video_frames.append(self.frame_transform(frame))
                 # stack it into a tensor
                 video = torch.stack(video_frames, 0)

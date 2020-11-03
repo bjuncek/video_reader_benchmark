@@ -47,7 +47,7 @@ class GenericVideoDataset(torch.utils.data.IterableDataset):
             start = random.uniform(0., max_seek)
             vid.seek(start, stream="video", any_frame=self.from_keyframes)
             while len(video_frames) < self.clip_len:
-                frame, current_pts, stream_t = vid.next("video")
+                frame, current_pts = vid.next("video")
                 video_frames.append(self.frame_transform(frame))
             # stack it into a tensor
             video = torch.stack(video_frames, 0)

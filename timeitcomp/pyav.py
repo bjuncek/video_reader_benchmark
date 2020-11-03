@@ -35,7 +35,7 @@ lib_version = []
 
 for i in range(args.n):
     for file in os.listdir("../videos"):
-        if file in ["README", ".ipynb_checkpoints"]:
+        if file in ["README", ".ipynb_checkpoints", "WUzgd7C1pWA.mp4", "SOX5yA1l24A.mp4", "R6llTwEh07w.mp4"]:
             print("Skipping README")
             continue
 

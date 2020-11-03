@@ -29,7 +29,7 @@ class KFDataset(torch.utils.data.IterableDataset):
         self.epoch_size = epoch_size
         
         self.clip_len = clip_len  # length of a clip in frames
-        self.transform = frame_transform  # transform for every frame individually
+        self.transform = transform  # transform for every frame individually
     
     def __iter__(self):
         for i in range(self.epoch_size):
@@ -42,7 +42,7 @@ class KFDataset(torch.utils.data.IterableDataset):
                 start = random.uniform(0., 3600) # duration is an hour
             # seek only to keyframes
             vid.seek(start, stream="video", any_frame=False)
-            frame, current_pts, stream_t = vid.next("video")
+            frame, current_pts = vid.next("video")
             if self.transform:
                 frame = self.transform(frame)
                 

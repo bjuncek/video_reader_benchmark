@@ -4,8 +4,6 @@ from glob import glob
 
 import pandas as pd
 import torch
-from torchvision.datasets.folder import make_dataset
-from torchvision import transforms as t
 
 from video import Video
 
@@ -45,7 +43,7 @@ class AVADataset(torch.utils.data.IterableDataset):
 
             vid.seek(start, stream="video", any_frame=True)
             while len(video_frames) < self.clip_len:
-                frame, current_pts, stream_t = vid.next("video")
+                frame, current_pts = vid.next("video")
                 video_frames.append(self.frame_transform(frame))
             
             # stack it into a tensor
@@ -55,13 +53,7 @@ class AVADataset(torch.utils.data.IterableDataset):
             output = {
                     'path': path,
                     'video': video,
-                    # These are a pain bc the size is not constant,
-                    # How to handle this?
-#                     'x1': self.df.x1.loc[idx],
-#                     'y1': self.df.y1.loc[idx],
-#                     'x2': self.df.x2.loc[idx],
-#                     'y2': self.df.y2.loc[idx],
-#                     'action_id': self.df.action_id.loc[idx],
+                    # These are a pain lenghts of these is not constant,
                     'person_id': self.df.person_id.loc[idx],
             }
             yield output
