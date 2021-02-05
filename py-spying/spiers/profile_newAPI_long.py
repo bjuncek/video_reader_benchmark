@@ -11,4 +11,7 @@ videos = [os.path.join("../videos/", x) for x in os.listdir("../videos") if x no
 print("Now starting video decoding for profile")
 for i in range(100):
     for path in videos:
-        vframes, _, _ = torchvision.io.read_video(path)
+        frames = []
+        reader = torchvision.io.VideoReader(path, "video")
+        for data in reader:
+            frames.append(data["data"])

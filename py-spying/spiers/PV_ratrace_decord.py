@@ -1,4 +1,3 @@
-import os
 from decord import VideoReader
 from decord import cpu, gpu
 
