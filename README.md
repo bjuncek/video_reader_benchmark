@@ -2,7 +2,7 @@
 Benchmarking and profiling various video reading options for python
 
 
-## Setup on a mac
+## Setup on a mac - PROBABLY DEPRECATED
 Basically, constrained to a conda env
 
 ```
@@ -34,6 +34,16 @@ git clone git@github.com:pytorch/vision.git
 cd vision
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
 
-
-
 ```
+
+
+## Notes and descriptions
+
+### py-spying
+This folder provides everything necessary to generate py-spy profiles for various readers; idea behind this, was to measure and compare the functional calls of various libraries. 
+
+### timeitcomp
+Compare runtimes of various libraries. Results are generated to the `out` folder, and `Graph Results` notebook can be used to visualize the results
+
+### torch_overhead
+Measure overhead of various torch allocations.

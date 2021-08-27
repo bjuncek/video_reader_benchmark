@@ -97,7 +97,7 @@ df = pd.DataFrame(
         "lib_version": lib_version,
     }
 )
-df.to_csv("out/tv_fullvideo.csv")
+df.to_csv("out/tvNewAPI_fullvideo.csv")
 
 df = pd.DataFrame(
     {
@@ -108,4 +108,4 @@ df = pd.DataFrame(
         "lib_version": lib_version,
     }
 )
-df.to_csv("out/tv_random_seek.csv")
+df.to_csv("out/tvNewAPI_random_seek.csv")
