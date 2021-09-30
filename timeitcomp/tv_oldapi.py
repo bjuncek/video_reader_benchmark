@@ -45,7 +45,7 @@ for i in range(args.n):
         print(path, nframes)
 
         video.append(file)
-        loaders.append("VideoReader")
+        loaders.append("tv_oldAPI")
         num_frames.append(nframes)
         lib_version.append(torchvision.__version__)
 
