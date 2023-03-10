@@ -48,7 +48,12 @@ This folder provides everything necessary to generate py-spy profiles for variou
 to work everything needs to be built in DEBUG mode, which is a pain for FFMPEG. 
 
 ### timeitcomp
-Compare runtimes of various libraries. Results are generated to the `out` folder, and `Graph Results` notebook can be used to visualize the results
+Compare runtimes of various libraries. Results are generated to the `out` folder, and `Graph Results` notebook can be used to visualize the results.
+Files:
+- `sequential_compare.py` - compare the lenght taken for a sequential read of a video
+- `random_compare.py` - compare the time taken for a random read for k frames from a video (k={1,5,10}); Note that time to create a reader instance is _not_ included in the comparison, as this is a one time cost, compared to seeking. `decord` uses the `get_batch` api, instead of the `NextFrame()` api, which is more similar to the other libraries, but comparatively slower. We are sampling 3 clips from each video.
+
+`Graph Results` notebook can be used to visualize the results: in cell 2, please select which file you want to visualise out of the options.
 
 ### torch_overhead
 Measure overhead of various torch allocations.

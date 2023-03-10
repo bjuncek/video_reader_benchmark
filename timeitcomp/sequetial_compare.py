@@ -13,7 +13,6 @@ from decord import VideoReader, cpu, gpu
 
 parser = argparse.ArgumentParser(description="Process some integers.")
 parser.add_argument("--n", default=4, type=int, help="Number of trials to run")
-parser.add_argument("--output", action="store_true", help="Output the results to a csv file", default=False)
 args = parser.parse_args()
 
 
@@ -72,7 +71,7 @@ def get_cv2(path):
     cap.release()
 
 def measure_TVVR(path):
-    vframes, _, _ = torchvision.io.read_video(path)
+    vframes, _, _ = torchvision.io.read_video(path, pts_unit="sec")
 
 def measure_TV(path, threads=0):
     """We pass a path and get the
@@ -89,13 +88,6 @@ def measure_DECORD(path):
     for i in range(len(vr)):
         # the video reader will handle seeking and skipping in the most efficient manner
         images_av.append(vr[i])
-
-# def get_decord_gpu(path):
-#     images_av = []
-#     vr = VideoReader(path, ctx=gpu(0))
-#     for i in range(len(vr)):
-#         # the video reader will handle seeking and skipping in the most efficient manner
-#         images_av.append(vr[i])
 
 
 loaders = []
@@ -219,14 +211,13 @@ for num_threads in [1, 4, 8]:
 
 compare = benchmark.Compare(times)
 compare.print()
-if args.output:
-    df = pd.DataFrame(
-        {
-            "decoder": loaders,
-            "video": video,
-            "time": mean_times,
-            "num_frames": num_frames,
-            "num_threads": threads,
-        }
-    )
-    df.to_csv("out/MASTER.csv")
+df = pd.DataFrame(
+    {
+        "decoder": loaders,
+        "video": video,
+        "time": mean_times,
+        "num_frames": num_frames,
+        "num_threads": threads,
+    }
+)
+df.to_csv("out/READ_ENTIRE_VID.csv")

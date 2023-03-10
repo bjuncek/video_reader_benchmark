@@ -16,7 +16,6 @@ from decord import VideoReader, cpu
 parser = argparse.ArgumentParser(description="Process some integers.")
 parser.add_argument("--n", default=4, type=int, help="Number of trials to run")
 parser.add_argument("--num_clips", default=3, type=int, help="Number of clips to sample")
-
 args = parser.parse_args()
 
 
@@ -128,8 +127,10 @@ for file in os.listdir("../videos"):
     duration = float(
         container.streams.video[0].duration * container.streams.video[0].time_base
     )
+    
     try:
-        seektimes = random.sample(range(0, int(duration-1)), args.num_clips)
+        step = duration // args.num_clips
+        seektimes = [step * i for i in range(args.num_clips)]
     except ValueError:
         seektimes = [0, duration // 2]
     
@@ -195,4 +196,4 @@ df = pd.DataFrame(
         "frames_read": threads,
     }
 )
-df.to_csv("out/READ_RANDOM_SEEK.csv")
+df.to_csv("out/READ_UNIFORM_SEEK.csv")
