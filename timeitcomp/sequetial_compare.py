@@ -23,6 +23,7 @@ from decord import VideoReader, cpu  #, gpu
 setup_newAPI = """\
 import torch
 import torchvision
+torchvision.set_video_backend("video_reader")
 """
 
 setup_tvvr = """\
@@ -51,10 +52,10 @@ import numpy as np
 """
 
 
-def measure_PYAV(path):
+def measure_PYAV(path, nthreads=1):
     images_av = []
     container = av.open(path)
-    container.streams.video[0].thread_count = 1  # force single thread
+    container.streams.video[0].thread_count = nthreads  # force single thread
     for frame in container.decode(video=0):
         images_av.append(frame.to_rgb().to_ndarray())
 
@@ -96,118 +97,129 @@ mean_times = []
 video = []
 num_frames = []
 threads = []
+codecs = []
 
-for num_threads in [1, 4, 8]:
-    for file in os.listdir("../videos"):
-        if file in ["README", ".ipynb_checkpoints", "avadl.py"]:
-            print(f"Skipping {file}")
-            continue
-
-        path = os.path.join("../videos/", file)
-        images_av = []
-        vr = VideoReader(path, ctx=cpu(0))
-        for i in range(len(vr)):
-            # the video reader will handle seeking and skipping in the most efficient manner
-            images_av.append(vr[i])
+_codecs = ["original", "h264", "xvid"]
+for codec in _codecs:
+    for num_threads in [1, 4, 8]:
+        for file in os.listdir(f"../videos/{codec}"):
+            if file in ["README", ".ipynb_checkpoints", "avadl.py"]:
+                print(f"Skipping {file}")
+                continue
         
-        nframes = len(images_av)
-        
-        print(path, nframes)
-        video.append(file)
-        loaders.append("decord_cpu")
-        num_frames.append(nframes)
-        times.append(benchmark.Timer(
-                stmt=f'measure_DECORD("{path}")',
-                setup=setup_decord,
-                globals=globals(),
-                label="Video Reading",
-                sub_label=str(file),
-                description="DECORD",
-                num_threads=num_threads,
-            ).timeit(args.n))
-        mean_times.append(times[-1].mean)
-        threads.append(num_threads)
+            fileid = file.split(".")[0]
 
-        
-        video.append(file)
-        loaders.append("tv_newAPI")
-        num_frames.append(nframes)
-        times.append(
-            benchmark.Timer(
-                stmt=f'measure_TV("{path}", {num_threads})',
-                setup=setup_newAPI,
-                globals=globals(),
-                label="Video Reading",
-                sub_label=str(file),
-                description="TV-newAPI",
-                num_threads=num_threads,
-            ).timeit(args.n))
-        mean_times.append(times[-1].mean)
-        threads.append(num_threads)
+            path = os.path.join(f"../videos/{codec}", file)
+            images_av = []
+            vr = VideoReader(path, ctx=cpu(0))
+            for i in range(len(vr)):
+                # the video reader will handle seeking and skipping in the most efficient manner
+                images_av.append(vr[i])
+            
+            nframes = len(images_av)
+            
+            print(path, nframes)
+            video.append(fileid)
+            loaders.append("decord_cpu")
+            num_frames.append(nframes)
+            times.append(benchmark.Timer(
+                    stmt=f'measure_DECORD("{path}")',
+                    setup=setup_decord,
+                    globals=globals(),
+                    label="Video Reading",
+                    sub_label=str(fileid),
+                    description="DECORD",
+                    num_threads=num_threads,
+                ).timeit(args.n))
+            mean_times.append(times[-1].mean)
+            threads.append(num_threads)
+            codecs.append(codec)
 
-        video.append(file)
-        loaders.append("pyav")
-        num_frames.append(nframes)
-        times.append(
-            benchmark.Timer(
-                stmt=f'measure_PYAV("{path}")',
-                setup=setup_pyav,
-                globals=globals(),
-                label="Video Reading",
-                sub_label=str(file),
-                description="pyav",
-                num_threads=num_threads,
-            ).timeit(args.n))
-        mean_times.append(times[-1].mean)
-        threads.append(num_threads)
+            
+            video.append(fileid)
+            loaders.append("tv_newAPI")
+            num_frames.append(nframes)
+            times.append(
+                benchmark.Timer(
+                    stmt=f'measure_TV("{path}", {num_threads})',
+                    setup=setup_newAPI,
+                    globals=globals(),
+                    label="Video Reading",
+                    sub_label=str(fileid),
+                    description="TV-newAPI",
+                    num_threads=num_threads,
+                ).timeit(args.n))
+            mean_times.append(times[-1].mean)
+            threads.append(num_threads)
+            codecs.append(codec)
 
-        video.append(file)
-        loaders.append("tv_vr")
-        num_frames.append(nframes)
-        times.append(
-            benchmark.Timer(
-                stmt=f'measure_TVVR("{path}")',
-                setup=setup_tvvr,
-                globals=globals(),
-                label="Video Reading",
-                sub_label=str(file),
-                description="TV-vr",
-                num_threads=num_threads,
-            ).timeit(args.n))
-        mean_times.append(times[-1].mean)
-        threads.append(num_threads)
+            video.append(fileid)
+            loaders.append("pyav")
+            num_frames.append(nframes)
+            times.append(
+                benchmark.Timer(
+                    stmt=f'measure_PYAV("{path}", {num_threads})',
+                    setup=setup_pyav,
+                    globals=globals(),
+                    label="Video Reading",
+                    sub_label=str(fileid),
+                    description="pyav",
+                    num_threads=num_threads,
+                ).timeit(args.n))
+            mean_times.append(times[-1].mean)
+            threads.append(num_threads)
+            codecs.append(codec)
 
-        video.append(file)
-        loaders.append("tv_pyav")
-        num_frames.append(nframes)
-        times.append(
-            benchmark.Timer(
-                stmt=f'measure_TVVR("{path}")',
-                setup=setup_tvpyav,
-                globals=globals(),
-                label="Video Reading",
-                sub_label=str(file),
-                description="TV-pyav",
-                num_threads=num_threads,
-            ).timeit(args.n))
-        mean_times.append(times[-1].mean)
-        threads.append(num_threads)
+            video.append(fileid)
+            loaders.append("tv_vr")
+            num_frames.append(nframes)
+            times.append(
+                benchmark.Timer(
+                    stmt=f'measure_TVVR("{path}")',
+                    setup=setup_tvvr,
+                    globals=globals(),
+                    label="Video Reading",
+                    sub_label=str(fileid),
+                    description="TV-vr",
+                    num_threads=num_threads,
+                ).timeit(args.n))
+            mean_times.append(times[-1].mean)
+            threads.append(num_threads)
+            codecs.append(codec)
 
-        video.append(file)
-        loaders.append("openCV")
-        num_frames.append(nframes)
-        times.append(
-            benchmark.Timer(
-                stmt=f'get_cv2("{path}")',
-                setup=setup_cv2,
-                globals=globals(),
-                label="Video Reading",
-                sub_label=str(file),
-                description="openCV",
-                num_threads=num_threads,
-            ).timeit(args.n))
-        mean_times.append(times[-1].mean)
-        threads.append(num_threads)
+            video.append(fileid)
+            loaders.append("tv_pyav")
+            num_frames.append(nframes)
+            times.append(
+                benchmark.Timer(
+                    stmt=f'measure_TVVR("{path}")',
+                    setup=setup_tvpyav,
+                    globals=globals(),
+                    label="Video Reading",
+                    sub_label=str(fileid),
+                    description="TV-pyav",
+                    num_threads=num_threads,
+                ).timeit(args.n))
+            mean_times.append(times[-1].mean)
+            threads.append(num_threads)
+            codecs.append(codec)
+
+            video.append(fileid)
+            loaders.append("openCV")
+            num_frames.append(nframes)
+            times.append(
+                benchmark.Timer(
+                    stmt=f'get_cv2("{path}")',
+                    setup=setup_cv2,
+                    globals=globals(),
+                    label="Video Reading",
+                    sub_label=str(fileid),
+                    description="openCV",
+                    num_threads=num_threads,
+                ).timeit(args.n))
+            mean_times.append(times[-1].mean)
+            threads.append(num_threads)
+            codecs.append(codec)
 
 compare = benchmark.Compare(times)
 compare.print()
@@ -218,6 +230,7 @@ df = pd.DataFrame(
         "time": mean_times,
         "num_frames": num_frames,
         "num_threads": threads,
+        "codec": codecs,
     }
 )
 df.to_csv("out/READ_ENTIRE_VID.csv")

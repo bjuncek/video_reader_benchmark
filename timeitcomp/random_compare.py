@@ -27,6 +27,7 @@ from decord import VideoReader, cpu  #, gpu
 setup_newAPI = """\
 import torch
 import torchvision
+torchvision.set_video_backend("video_reader")
 """
 
 setup_tvvr = """\
@@ -109,79 +110,86 @@ mean_times = []
 video = []
 num_frames = []
 threads = []
+codecs = []
+_codecs = ["original", "h264", "xvid"]
+for codec in _codecs:
+    for num_threads in [1, 4, 8]:
+        for file in os.listdir(f"../videos/{codec}"):
+            if file in ["README", ".ipynb_checkpoints", "avadl.py"]:
+                print(f"Skipping {file}")
+                continue
 
+            path = os.path.join(f"../videos/{codec}", file)
+            images_av = []
+            container = av.open(path)
+            container.streams.video[0].thread_count = 1  # force single thread
+            for frame in container.decode(video=0):
+                images_av.append(frame.to_rgb().to_ndarray())
+            nframes = len(images_av)
 
-for file in os.listdir("../videos"):
-    if file in ["README", ".ipynb_checkpoints", "avadl.py"]:
-        print(f"Skipping {file}")
-        continue
+            container = av.open(path)
+            duration = float(
+                container.streams.video[0].duration * container.streams.video[0].time_base
+            )
+            try:
+                seektimes = random.sample(range(0, int(duration-1)), args.num_clips)
+            except ValueError:
+                seektimes = [0, duration // 2]
+            
+            for frames_to_read in [1, 5, 10]:
+                print(path, nframes, duration, seektimes, frames_to_read, codec)
+                container = av.open(path)
+                container.streams.video[0].thread_count = num_threads
+                video.append(file)
+                loaders.append("pyav")
+                num_frames.append(frames_to_read)
+                times.append(benchmark.Timer(
+                        stmt=f"get_pyav_random_seek(container, seektimes, frames_to_read)",
+                        setup=setup_pyav,
+                        globals=globals(),
+                        label="Video Reading",
+                        sub_label=str(file),
+                        description="pyav",
+                        num_threads=num_threads,
+                    ).timeit(args.n))
+                mean_times.append(times[-1].mean)
+                threads.append(num_threads)
+                codecs.append(codec)
 
-    path = os.path.join("../videos/", file)
-    images_av = []
-    container = av.open(path)
-    container.streams.video[0].thread_count = 1  # force single thread
-    for frame in container.decode(video=0):
-        images_av.append(frame.to_rgb().to_ndarray())
-    nframes = len(images_av)
+                torchvision.set_video_backend("video_reader")
+                reader = torchvision.io.VideoReader(path, "video", num_threads=num_threads)
+                video.append(file)
+                loaders.append("tv_newapi")
+                num_frames.append(frames_to_read)
+                times.append(benchmark.Timer(
+                        stmt=f"measure_seek_and_decode(reader, seektimes, frames_to_read)",
+                        setup=setup_tvvr,
+                        globals=globals(),
+                        label="Video Reading",
+                        sub_label=str(file),
+                        description="tv_newapi",
+                        num_threads=num_threads,
+                    ).timeit(args.n))
+                mean_times.append(times[-1].mean)
+                threads.append(num_threads)
+                codecs.append(codec)
 
-    container = av.open(path)
-    duration = float(
-        container.streams.video[0].duration * container.streams.video[0].time_base
-    )
-    try:
-        seektimes = random.sample(range(0, int(duration-1)), args.num_clips)
-    except ValueError:
-        seektimes = [0, duration // 2]
-    
-    print(path, nframes, duration, seektimes)
-
-    for frames_to_read in [1, 5, 10]:
-        video.append(file)
-        loaders.append("pyav")
-        num_frames.append(frames_to_read)
-        times.append(benchmark.Timer(
-                stmt=f"get_pyav_random_seek(container, seektimes, frames_to_read)",
-                setup=setup_pyav,
-                globals=globals(),
-                label="Video Reading",
-                sub_label=str(file),
-                description="PYAV",
-                # num_threads=num_threads,
-            ).timeit(args.n))
-        mean_times.append(times[-1].mean)
-        threads.append(frames_to_read)
-
-        torchvision.set_video_backend("video_reader")
-        reader = torchvision.io.VideoReader(path, "video")
-        video.append(file)
-        loaders.append("tv_cpp")
-        num_frames.append(frames_to_read)
-        times.append(benchmark.Timer(
-                stmt=f"measure_seek_and_decode(reader, seektimes, frames_to_read)",
-                setup=setup_tvvr,
-                globals=globals(),
-                label="Video Reading",
-                sub_label=str(file),
-                description="TV_NEWAPI",
-            ).timeit(args.n))
-        mean_times.append(times[-1].mean)
-        threads.append(frames_to_read)
-
-        vr = VideoReader(path, ctx=cpu(0))
-        video.append(file)
-        loaders.append("decord")
-        num_frames.append(frames_to_read)
-        times.append(benchmark.Timer(
-                stmt=f"measure_decord_one(vr, seektimes, frames_to_read)",
-                setup=setup_decord,
-                globals=globals(),
-                label="Video Reading",
-                sub_label=str(file),
-                description="DECORD",
-                # num_threads=num_threads,
-            ).timeit(args.n))
-        mean_times.append(times[-1].mean)
-        threads.append(frames_to_read)
+                vr = VideoReader(path, ctx=cpu(0))
+                video.append(file)
+                loaders.append("decord")
+                num_frames.append(frames_to_read)
+                times.append(benchmark.Timer(
+                        stmt=f"measure_decord_one(vr, seektimes, frames_to_read)",
+                        setup=setup_decord,
+                        globals=globals(),
+                        label="Video Reading",
+                        sub_label=str(file),
+                        description="decord",
+                        num_threads=num_threads,
+                    ).timeit(args.n))
+                mean_times.append(times[-1].mean)
+                threads.append(num_threads)
+                codecs.append(codec)
 
 
 compare = benchmark.Compare(times)
@@ -192,7 +200,8 @@ df = pd.DataFrame(
         "video": video,
         "time": mean_times,
         "num_frames": num_frames,
-        "frames_read": threads,
+        "num_threads": threads,
+        "codec": codecs,
     }
 )
 df.to_csv("out/READ_RANDOM_SEEK.csv")
