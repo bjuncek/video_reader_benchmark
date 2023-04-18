@@ -1,7 +1,8 @@
 .vscode/*
 .ipynb_checkpoints/*
 *checkpoint*
-
+*.yaml
+./lightning_logs
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
