@@ -68,13 +68,15 @@ class PYAVReader(Reader):
             if frame.pts >= start_offset:
                 frames[frame.pts] = frame
 
-            if len(frames) >= self.cfg.clip_len:
+            if len(frames) > self.cfg.clip_len:
                 break
 
         result = [frames[i] for i in sorted(frames)]
         if len(result) < self.cfg.clip_len:
             warnings.warn("Not enough frames found, padding with last frame")
             result = result + [result[-1]] * (self.cfg.clip_len - len(result))
+        if len(result) > self.cfg.clip_len:
+            result = result[: self.cfg.clip_len]
         result = [torch.from_numpy(frame.to_rgb().to_ndarray()) for frame in result]
         ret = torch.stack(result, 0).permute(0, 3, 1, 2)
         return ret

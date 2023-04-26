@@ -19,10 +19,10 @@ class KineticsRandom(KineticsIterDataset):
             duration = vid.get_duration()
             fps = vid.cfg.frame_rate
             clip_len_in_s = vid.cfg.clip_len / fps
-            max_seek = duration - clip_len_in_s + self.alpha
+            max_seek = duration - clip_len_in_s - self.alpha
             start = random.uniform(0.0, max_seek)
 
-            video = vid.get_frames(start)
+            video = vid.read_video(start)
             if self.transform:
                 video = self.transform(video)
             yield video, torch.tensor(target)
@@ -43,7 +43,7 @@ class KineticsSequential(KineticsIterDataset):
             duration = vid.get_duration()
             fps = vid.cfg.frame_rate
             clip_len_in_s = vid.cfg.clip_len / fps
-            max_seek = duration - clip_len_in_s + self.alpha
+            max_seek = duration - clip_len_in_s - self.alpha
 
             tss = [
                 i.item()
@@ -51,7 +51,7 @@ class KineticsSequential(KineticsIterDataset):
             ]
             for start in tss:
                 print(i, duration, start)
-                video = vid.get_frames(start)
+                video = vid.read_video(start)
                 if self.transform:
                     video = self.transform(video)
                 yield video, torch.tensor(target)

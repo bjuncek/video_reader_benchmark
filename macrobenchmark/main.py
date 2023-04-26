@@ -20,7 +20,7 @@ def main(args):
     )
     reader = PYAVReader
 
-    trainer = pl.Trainer(max_epochs=1, profiler="simple", accelerator="gpu", devices=1)
+    trainer = pl.Trainer(max_epochs=1, devices=1)
 
     model = BenchmarkModel(_weights)
     datamodule = KineticsDataModule(datacfg, _weights, reader=reader)

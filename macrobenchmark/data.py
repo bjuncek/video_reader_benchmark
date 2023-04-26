@@ -5,6 +5,8 @@ import lightning.pytorch as pl
 import torch
 
 from dataset_utils import DatasetConfig
+from dataset_map import KineticsDataset
+from dataset_iterable import KineticsRandom, KineticsSequential
 
 
 class KineticsDataModule(pl.LightningDataModule):
@@ -17,28 +19,28 @@ class KineticsDataModule(pl.LightningDataModule):
 
     def setup(self, stage: Optional[str] = None):
         if self.data_cfg.dataset_type == "mapstyle":
-            from dataset_map import KineticsDataset
-
             self.train = KineticsDataset(
                 self.data_cfg, self.reader, transform=self.transform
             )
         else:
-            if self.data_cfg.sampling == "uniform":
-                from dataset_iterable import KineticsSequential
-
-                self.train = KineticsSequential(
-                    self.data_cfg, self.reader, transform=self.transform
-                )
-            elif self.data_cfg.sampling == "random":
-                from dataset_iterable import KineticsRandom
-
+            if self.data_cfg.sampling == "random":
                 self.train = KineticsRandom(
                     self.data_cfg, self.reader, transform=self.transform
                 )
             else:
-                raise ValueError("sampling must be either 'random' or 'uniform'")
+                self.train = KineticsSequential(
+                    self.data_cfg, self.reader, transform=self.transform
+                )
 
     def train_dataloader(self):
-        return torch.utils.data.DataLoader(
-            self.train, batch_size=self.batch_size, shuffle=True, num_workers=8
-        )
+        if self.data_cfg.dataset_type == "mapstyle":
+            return torch.utils.data.DataLoader(
+                self.train,
+                batch_size=self.batch_size,
+                shuffle=True,
+                num_workers=8,
+            )
+        else:
+            return torch.utils.data.DataLoader(
+                self.train, batch_size=self.batch_size, num_workers=8
+            )
