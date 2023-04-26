@@ -42,5 +42,5 @@ class KineticsDataModule(pl.LightningDataModule):
             )
         else:
             return torch.utils.data.DataLoader(
-                self.train, batch_size=self.batch_size, num_workers=8
+                self.train, batch_size=self.batch_size, num_workers=1
             )

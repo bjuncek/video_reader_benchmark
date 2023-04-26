@@ -5,9 +5,18 @@ from dataset_utils import DatasetConfig
 from data import KineticsDataModule
 
 from model import BenchmarkModel
-from reader import PYAVReader
+from reader import PYAVReader, TVReader
 from torchvision.models.video import R3D_18_Weights
 
+def get_reader(name):
+    if name == "tv":
+        return TVReader
+    elif name == "pyav":
+        return PYAVReader
+    elif name == "ta":
+        raise NotImplementedError
+    else:
+        raise ValueError(f"Unknown reader {name}")
 
 def main(args):
     _weights = R3D_18_Weights.DEFAULT
@@ -18,7 +27,7 @@ def main(args):
         clip_multiplier=args.clip_multiplier,
         batch_size=args.batch_size,
     )
-    reader = PYAVReader
+    reader = get_reader(args.reader)
 
     trainer = pl.Trainer(max_epochs=1, devices=1)
 

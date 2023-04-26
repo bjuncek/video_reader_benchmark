@@ -50,7 +50,6 @@ class KineticsSequential(KineticsIterDataset):
                 for i in list(torch.linspace(0, max_seek, steps=self.num_steps))
             ]
             for start in tss:
-                print(i, duration, start)
                 video = vid.read_video(start)
                 if self.transform:
                     video = self.transform(video)
