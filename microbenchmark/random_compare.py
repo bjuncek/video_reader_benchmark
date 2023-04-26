@@ -4,6 +4,7 @@ import pandas as pd
 import random
 
 import torchvision
+import torchaudio
 import torch.utils.benchmark as benchmark
 
 import itertools
@@ -55,6 +56,10 @@ import av
 import numpy as np
 """
 
+setup_ta = """\
+from torchaudio.io import StreamReader
+"""
+
 
 def get_pyav_random_seek(container, times_in_s, num_frames=10):
     stream = container.streams.video[0]
@@ -100,8 +105,31 @@ def measure_decord_one(reader, times_in_s, num_frames=10):
     reflen = len(results[0])
     for r in results:
         assert len(r) == reflen
-    
-    
+
+
+def measure_TA(vid, times_in_s, num_frames=10):
+    results = []
+    vid.add_basic_video_stream(
+        frames_per_chunk=1,
+        format="rgb24"
+    )
+    fps = vid.get_out_stream_info(0).frame_rate
+    for time_in_s in times_in_s:
+        vid.seek(0)
+        curr, counter = 0, 0
+        frames = []
+        for chunks in vid.stream():
+            if len(frames) < num_frames:
+                curr = counter / fps
+                if curr >= time_in_s:
+                    frames.append(chunks[0])
+                counter += 1
+            else:
+                break
+        results.append(frames)    
+    reflen = len(results[0])
+    for r in results:
+        assert len(r) == reflen
 
 
 loaders = []
@@ -185,6 +213,23 @@ for codec in _codecs:
                         label="Video Reading",
                         sub_label=str(file),
                         description="decord",
+                        num_threads=num_threads,
+                    ).timeit(args.n))
+                mean_times.append(times[-1].mean)
+                threads.append(num_threads)
+                codecs.append(codec)
+
+                vr = torchaudio.io.StreamReader(path)
+                video.append(file)
+                loaders.append("torchaudio")
+                num_frames.append(frames_to_read)
+                times.append(benchmark.Timer(
+                        stmt=f"measure_TA(vr, seektimes, frames_to_read)",
+                        setup=setup_decord,
+                        globals=globals(),
+                        label="Video Reading",
+                        sub_label=str(file),
+                        description="TORCHAUDIO",
                         num_threads=num_threads,
                     ).timeit(args.n))
                 mean_times.append(times[-1].mean)

@@ -2,6 +2,7 @@ import argparse
 import os
 import pandas as pd
 
+import torchaudio
 import torchvision
 import torch.utils.benchmark as benchmark
 
@@ -51,6 +52,10 @@ import av
 import numpy as np
 """
 
+setup_ta = """\
+from torchaudio.io import StreamReader
+"""
+
 
 def measure_PYAV(path, nthreads=1):
     images_av = []
@@ -89,6 +94,16 @@ def measure_DECORD(path):
     for i in range(len(vr)):
         # the video reader will handle seeking and skipping in the most efficient manner
         images_av.append(vr[i])
+
+def measure_TA(path):
+    images_av = []
+    vid = torchaudio.io.StreamReader(path)
+    vid.add_basic_video_stream(
+        frames_per_chunk=1,
+        format="rgb24"
+    )
+    for chunks in vid.stream():
+        images_av.append(chunks[0])
 
 
 loaders = []
@@ -215,6 +230,23 @@ for codec in _codecs:
                     label="Video Reading",
                     sub_label=str(fileid),
                     description="openCV",
+                    num_threads=num_threads,
+                ).timeit(args.n))
+            mean_times.append(times[-1].mean)
+            threads.append(num_threads)
+            codecs.append(codec)
+
+            video.append(fileid)
+            loaders.append("torchaudio")
+            num_frames.append(nframes)
+            times.append(
+                benchmark.Timer(
+                    stmt=f'measure_TA("{path}")',
+                    setup=setup_ta,
+                    globals=globals(),
+                    label="Video Reading",
+                    sub_label=str(fileid),
+                    description="TA",
                     num_threads=num_threads,
                 ).timeit(args.n))
             mean_times.append(times[-1].mean)

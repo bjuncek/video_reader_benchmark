@@ -4,6 +4,7 @@ import math
 import av
 import torch
 import torchvision
+import torchaudio
 import warnings
 
 @dataclass
@@ -28,27 +29,59 @@ class Reader(object):
 class TVReader(Reader):
     """Reader for video files using torchvision.io."""
 
-    def __init__(self, cfg: VideoConfig, **kwargs):
+    def __init__(self, path, cfg: VideoConfig, **kwargs):
         torchvision.set_video_backend("pyav")
-        super().__init__(cfg, **kwargs)
+        self.container = torchvision.io.VideoReader(path, "video")
+        self.cfg = cfg
 
-    def read_video(self, path, start):
-        if self.path is not None and path != self.path:
-            self.container = torchvision.io.VideoReader(path, "video")
-            self.path = path
-        frames = []
-        for data in itertools.islice(self.container.seek(start), self.cfg.num_frames):
-            frames.append(data["data"])
-        frames.append(frames)
-        return torch.stack(frames, 0)
+    def read_video(self, start):
+        result = []
+        for data in itertools.islice(self.container.seek(start), self.cfg.clip_len):
+            result.append(data["data"])
 
-    def get_duration(self, path):
-        if (self.container is None or self.path is not None) or path != self.path:
-            self.container = torchvision.io.VideoReader(path, "video")
-            self.path = path
+        if len(result) < self.cfg.clip_len:
+            warnings.warn("Not enough frames found, padding with last frame")
+            result = result + [result[-1]] * (self.cfg.clip_len - len(result))
+        if len(result) > self.cfg.clip_len:
+            result = result[: self.cfg.clip_len]
+        return torch.stack(result, 0)
 
+    def get_duration(self):
         return self.container.get_metadata()["video"]["duration"][0]
 
+
+class TAReader(Reader):
+    """Reader for video files using torchaudio.io.
+    NOT TESTED"""
+
+    def __init__(self, path, cfg: VideoConfig, **kwargs):
+        self.container = torchaudio.io.StreamReader(path)
+        self.container.add_basic_video_stream(
+            frames_per_chunk=1,
+            format="rgb24",
+            frame_rate=cfg.frame_rate,
+        )
+        self.cfg = cfg
+
+    def read_video(self, start):
+        result = []
+        curr = 0
+        counter = 0
+        for chunks in self.container.stream():
+            if len(result) < self.cfg.clip_len:
+                curr = counter / self.cfg.frame_rate
+                if curr >= start:
+                    result.append(chunks[0])
+                counter += 1
+        if len(result) < self.cfg.clip_len:
+            warnings.warn("Not enough frames found, padding with last frame")
+            result = result + [result[-1]] * (self.cfg.clip_len - len(result))
+        if len(result) > self.cfg.clip_len:
+            result = result[: self.cfg.clip_len]
+        return torch.stack(result, 0)
+
+    def get_duration(self):
+        return self.container.get_metadata()["video"]["duration"][0]
 
 class PYAVReader(Reader):
     def __init__(self, path, cfg: VideoConfig, **kwargs):
